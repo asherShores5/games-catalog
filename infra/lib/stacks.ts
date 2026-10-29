@@ -100,7 +100,7 @@ export class AppStack extends Stack {
 
     const ds = api.addLambdaDataSource("ApiDs", fn);
     for (const field of ["games", "platforms", "accounts"]) ds.createResolver(`Q${field}`, { typeName: "Query", fieldName: field });
-    for (const field of ["addGame", "addCopy", "removeCopy", "setPlayStatus", "setWishlist", "addPlatform", "renamePlatform", "deletePlatform", "addAccount", "renameAccount", "deleteAccount", "setSteamId", "importSteam"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
+    for (const field of ["addGame", "addCopy", "fillUnknownCopy", "removeCopy", "setPlayStatus", "setWishlist", "addPlatform", "renamePlatform", "deletePlatform", "addAccount", "renameAccount", "deleteAccount", "setSteamId", "importSteam"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
 
     // The web app's /config.json takes these values (see web/public/config.example.json).
     new CfnOutput(this, "Region", { value: this.region });

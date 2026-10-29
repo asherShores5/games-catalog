@@ -1,11 +1,11 @@
 import { useState } from "react";
 import {
-  EDITION_MAX, FORMATS, PLAY_STATUSES, accountLabel, canWishlist, needsAccount,
+  EDITION_MAX, FORMATS, PLAY_STATUSES, UNKNOWN_LOCATION, accountLabel, canWishlist, needsAccount,
   type Account, type Format, type Game, type Platform, type PlayStatus,
 } from "@games/shared";
-import { addCopy, removeCopy, setPlayStatus, setWishlist } from "../api";
+import { addCopy, fillUnknownCopy, removeCopy, setPlayStatus, setWishlist } from "../api";
 
-/** One Game opened: its Copies (add/remove), Play status and Wishlist. */
+/** One Game opened: its Copies (add/remove, fill in an Unknown Copy), Play status and Wishlist. */
 export function GameDetail({ game, platforms, accounts, onChange }: {
   game: Game;
   platforms: Platform[];
@@ -16,6 +16,8 @@ export function GameDetail({ game, platforms, accounts, onChange }: {
   const [format, setFormat] = useState<Format>("Digital");
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [edition, setEdition] = useState("");
+  // The Unknown Copy the form below is filling in, or undefined when it adds a new Copy.
+  const [fillingId, setFillingId] = useState<string>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -47,8 +49,13 @@ export function GameDetail({ game, platforms, accounts, onChange }: {
     const chosen = platformId || platforms[0]?.id;
     if (!chosen || accountMissing) return;
     const account = needsAccount(format) ? chosenAccount : undefined;
-    if (await run(() => addCopy({ gameId: game.id, platformId: chosen, format, accountId: account, edition: edition.trim() || undefined }))) {
+    const copy = { gameId: game.id, platformId: chosen, format, accountId: account, edition: edition.trim() || undefined };
+    const saved = fillingId
+      ? await run(() => fillUnknownCopy({ ...copy, copyId: fillingId }))
+      : await run(() => addCopy(copy));
+    if (saved) {
       setEdition("");
+      setFillingId(undefined);
     }
   }
 
@@ -57,11 +64,21 @@ export function GameDetail({ game, platforms, accounts, onChange }: {
       <ul className="copies">
         {game.copies.map((c) => (
           <li key={c.id}>
-            <span>
-              {platformName(c.platformId)} · {c.format}
-              {needsAccount(c.format) && ` · ${accountName(c.accountId)}`}
-              {c.edition && ` · ${c.edition}`}
-            </span>
+            {c.platformId === undefined || c.format === undefined ? (
+              <span>
+                <em>{UNKNOWN_LOCATION}</em>
+                {c.edition && ` · ${c.edition}`}{" "}
+                <button className="link" disabled={busy} onClick={() => setFillingId(fillingId === c.id ? undefined : c.id)}>
+                  {fillingId === c.id ? "Cancel" : "Fill in"}
+                </button>
+              </span>
+            ) : (
+              <span>
+                {platformName(c.platformId)} · {c.format}
+                {needsAccount(c.format) && ` · ${accountName(c.accountId)}`}
+                {c.edition && ` · ${c.edition}`}
+              </span>
+            )}
             <button className="link" disabled={busy} onClick={() => void run(() => removeCopy(game.id, c.id))}>Remove</button>
           </li>
         ))}
@@ -88,7 +105,9 @@ export function GameDetail({ game, platforms, accounts, onChange }: {
           </select>
         )}
         <input placeholder="Edition (optional)" value={edition} onChange={(e) => setEdition(e.target.value)} maxLength={EDITION_MAX} />
-        <button className="primary" disabled={busy || platforms.length === 0 || accountMissing}>Add Copy</button>
+        <button className="primary" disabled={busy || platforms.length === 0 || accountMissing}>
+          {fillingId ? "Save location" : "Add Copy"}
+        </button>
       </form>
 
       <div className="add">

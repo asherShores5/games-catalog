@@ -108,6 +108,21 @@ describe("Import from Steam", () => {
     expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toMatchObject({ added: 0, alreadyPresent: 1 });
   });
 
+  it("a Seeded Game keeps its Unknown Copy (I fill or remove it) and gains the Steam Copy beside it", async () => {
+    const steam = await steamAccount();
+    await h.seed(h.owner, [{ name: "Hades", status: "Playing" }]);
+    const [seeded] = await allGames();
+    h.steam.set(STEAM_ID, [{ appId: 1145360, name: "Hades" }]);
+
+    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toMatchObject({ added: 1, alreadyPresent: 0 });
+    const games = await allGames();
+    expect(games).toHaveLength(1);
+    expect(games[0]).toMatchObject({ id: seeded.id, playStatus: "Playing", steamAppId: 1145360 });
+    expect(games[0].copies).toHaveLength(2);
+    expect(games[0].copies).toContainEqual(seeded.copies[0]);
+    expect(games[0].copies).toContainEqual(expect.objectContaining({ format: "Digital", accountId: steam.id }));
+  });
+
   it("a Wishlist Game that turns up in the library leaves the Wishlist as Backlog", async () => {
     const steam = await steamAccount();
     const g = await h.call(h.owner, "addGame", { name: "Hades" });

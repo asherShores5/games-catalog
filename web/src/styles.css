@@ -26,4 +26,5 @@ button.row { background: none; border: none; color: inherit; text-align: left; c
 .copies { list-style: none; padding: 0; margin: 0; }
 .copies li { display: flex; justify-content: space-between; padding: 0.25rem 0; }
 input.search { width: 100%; box-sizing: border-box; margin-top: 0.75rem; }
+.filter-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
 .copy-summary { display: flex; flex-direction: column; font-size: 0.85rem; opacity: 0.75; margin-top: 0.15rem; }

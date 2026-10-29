@@ -3,7 +3,7 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { AppSyncIdentityCognito, AppSyncResolverEvent } from "aws-lambda";
 import {
-  SEED_PLATFORMS, STEAM_PLATFORM, accountLabel, afterCopyAdded, byAccountLabel, byName, canWishlist, isOwned,
+  SEED_PLATFORMS, STEAM_PLATFORM, accountLabel, afterCopyAdded, byAccountLabel, byName, canWishlist, isOwned, isUnknownCopy,
   samePlatformName, type Account, type Copy, type Format, type Game, type Platform, type PlayStatus,
   type SteamImportSummary, type Store,
 } from "@games/shared";
@@ -14,6 +14,7 @@ import {
 import { SteamError, type SteamLibrary } from "./steam";
 import { planSteamImport, type ImportStep } from "./steamImport";
 import { secretsManagerKey, steamWebApi } from "./steamWebApi";
+import { parseSeedRows, seedKey, seedState } from "./seed";
 
 const TABLE = process.env.TABLE_NAME!;
 
@@ -110,14 +111,29 @@ function gameRec(rec: Rec): GameRec {
 function copyOut(rec: Rec): Copy {
   return {
     id: rec.id as string,
-    platformId: rec.platformId as string,
-    format: rec.format as Format,
+    // Both absent on an Unknown Copy (from the Seed) until it is filled in.
+    platformId: rec.platformId as string | undefined,
+    format: rec.format as Format | undefined,
     // Absent on Physical Copies, and on Digital Copies saved before Accounts existed.
     accountId: rec.accountId as string | undefined,
     edition: rec.edition as string | undefined,
     createdAt: rec.createdAt as number,
   };
 }
+
+/** The Put for a brand-new Copy record of `gameId` (the Seed's Unknown Copies; writeCopy builds the same Put). */
+function putNewCopy(ctx: Ctx, gameId: string, copy: Copy) {
+  return {
+    Put: {
+      TableName: TABLE,
+      Item: { PK: ownerPk(ctx), SK: copyPrefix(gameId) + copy.id, gameId, ...copy },
+      ConditionExpression: "attribute_not_exists(PK)",
+    },
+  };
+}
+
+/** A Copy whose Platform and Format are known (anything but an Unknown Copy). */
+type KnownCopy = Copy & { platformId: string; format: Format };
 
 const oldestFirst = (a: Copy, b: Copy) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1);
 
@@ -201,7 +217,7 @@ async function addCopy(
   const platform = await getPlatform(ctx, args.platformId);
   const account = accountId === undefined ? undefined : await getAccount(ctx, accountId);
 
-  const copy: Copy = { id: randomUUID(), platformId: platform.id, format, accountId: account?.id, edition, createdAt: Date.now() };
+  const copy: KnownCopy = { id: randomUUID(), platformId: platform.id, format, accountId: account?.id, edition, createdAt: Date.now() };
   const next: GameRec = { ...game, ...afterCopyAdded(game), updatedAt: nextUpdatedAt(game) };
   await writeCopy(ctx, { read: game, next, copy });
   return gameOut(next, [...copies, copy]);
@@ -211,9 +227,13 @@ async function addCopy(
  * Write a Copy and its Game in one transaction: the Game record is rewritten only if unchanged
  * since `read` (or created, when there's no `read`), and the Copy's Platform and Account must
  * still exist, since a delete may be racing us. Validation is the caller's job (rules.ts).
- * `copyExtra` holds stored-only Copy fields (an Import's `steamAppId`).
+ * `copyExtra` holds stored-only Copy fields (an Import's `steamAppId`). `fill` overwrites an
+ * existing Copy (an Unknown Copy being filled in) instead of adding one.
  */
-async function writeCopy(ctx: Ctx, w: { read?: GameRec; next: GameRec; copy: Copy; copyExtra?: Rec }) {
+async function writeCopy(
+  ctx: Ctx,
+  w: { read?: GameRec; next: GameRec; copy: KnownCopy; copyExtra?: Rec; fill?: boolean },
+) {
   const { read, next, copy } = w;
   const mustExist = (SK: string) => ({
     ConditionCheck: { TableName: TABLE, Key: { PK: ownerPk(ctx), SK }, ConditionExpression: "attribute_exists(PK)" },
@@ -236,7 +256,7 @@ async function writeCopy(ctx: Ctx, w: { read?: GameRec; next: GameRec; copy: Cop
             Put: {
               TableName: TABLE,
               Item: { PK: ownerPk(ctx), SK: copyPrefix(next.id) + copy.id, gameId: next.id, ...w.copyExtra, ...copy },
-              ConditionExpression: "attribute_not_exists(PK)",
+              ConditionExpression: w.fill ? "attribute_exists(PK)" : "attribute_not_exists(PK)",
             },
           },
           mustExist(platformSk(copy.platformId)),
@@ -251,6 +271,33 @@ async function writeCopy(ctx: Ctx, w: { read?: GameRec; next: GameRec; copy: Cop
     if (codes) throw changedMeanwhile();
     throw e;
   }
+}
+
+/**
+ * Give an Unknown Copy its Platform and Format (and Account if Digital), keeping its id. The same
+ * rules as addCopy (validateCopyAccount, Platform/Account must exist, at index 2/3 of the
+ * transaction); Owned, Wishlist and Play status don't change since it was already a Copy.
+ */
+async function fillUnknownCopy(
+  ctx: Ctx,
+  args: { gameId: string; copyId: string; platformId: string; format: string; accountId?: string | null; edition?: string | null },
+) {
+  const format = validateFormat(args.format);
+  const accountId = validateCopyAccount(format, args.accountId);
+  const edition = validateEdition(args.edition);
+  const { game, copies } = await loadGame(ctx, args.gameId);
+  const unknown = copies.find((c) => c.id === args.copyId);
+  if (!unknown) throw new UserError("NotFound", "No such Copy on this Game");
+  if (!isUnknownCopy(unknown)) {
+    throw new UserError("ValidationError", "That Copy's location is already known; remove it and add a new Copy instead");
+  }
+  const platform = await getPlatform(ctx, args.platformId);
+  const account = accountId === undefined ? undefined : await getAccount(ctx, accountId);
+
+  const copy: KnownCopy = { ...unknown, platformId: platform.id, format, accountId: account?.id, edition: edition ?? unknown.edition };
+  const next: GameRec = { ...game, updatedAt: nextUpdatedAt(game) };
+  await writeCopy(ctx, { read: game, next, copy, fill: true });
+  return gameOut(next, copies.map((c) => (c.id === copy.id ? copy : c)));
 }
 
 async function removeCopy(ctx: Ctx, args: { gameId: string; copyId: string }) {
@@ -522,7 +569,7 @@ async function applyStep(
   step: ImportStep,
   env: { games: Map<string, Game>; platform: Platform; accountId: string },
 ): Promise<{ outcome: StepOutcome; gameId: string; name: string }> {
-  const newCopy = (): Copy => ({ id: randomUUID(), platformId: env.platform.id, format: "Digital", accountId: env.accountId, createdAt: Date.now() });
+  const newCopy = (): KnownCopy => ({ id: randomUUID(), platformId: env.platform.id, format: "Digital", accountId: env.accountId, createdAt: Date.now() });
   const copyExtra = { steamAppId: step.app.appId };
 
   if (step.kind === "newGame") {
@@ -598,8 +645,58 @@ async function importSteam(ctx: Ctx, args: { accountId: string }): Promise<Steam
   return summary;
 }
 
+// ---- Seed --------------------------------------------------------------------
+//
+// Not a resolver: scripts/seed.ts calls this in-process for one explicit owner (ticket 12 runs it
+// against prod). It writes the same records the resolvers do, each Game atomically with its
+// Unknown Copy, and skips any row whose Game is already in the catalog (by seedKey), so a re-run
+// (or a run after a partial failure) adds only what is missing and never touches existing Games.
+
+export interface SeedResult {
+  /** Names written (or, on a dry run, that would be). */
+  added: string[];
+  /** Names skipped because a Game with the same name is already in the catalog. */
+  present: string[];
+}
+
+export async function seedGames(userId: string, raw: unknown, opts: { dryRun?: boolean } = {}): Promise<SeedResult> {
+  if (!userId || userId.includes("#")) throw new UserError("ValidationError", "Seed needs the owner's Cognito sub");
+  const rows = parseSeedRows(raw);
+  const ctx: Ctx = { userId };
+  const existing = new Set((await allGames(ctx)).map((g) => seedKey(g.name)));
+  const result: SeedResult = { added: [], present: [] };
+  for (const row of rows) {
+    if (existing.has(seedKey(row.name))) {
+      result.present.push(row.name);
+      continue;
+    }
+    result.added.push(row.name);
+    if (opts.dryRun) continue;
+
+    const { wishlist, playStatus, unknownCopy } = seedState(row.status);
+    const now = Date.now();
+    const game: GameRec = { id: randomUUID(), name: row.name, wishlist, playStatus, createdAt: now, updatedAt: now };
+    const copy: Copy | undefined = unknownCopy ? { id: randomUUID(), createdAt: now } : undefined;
+    await ddb.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName: TABLE,
+              Item: { PK: ownerPk(ctx), SK: gameSk(game.id), ...game, playStatus: game.playStatus ?? undefined },
+              ConditionExpression: "attribute_not_exists(PK)",
+            },
+          },
+          ...(copy ? [putNewCopy(ctx, game.id, copy)] : []),
+        ],
+      }),
+    );
+  }
+  return result;
+}
+
 const RESOLVERS: Record<string, (ctx: Ctx, args: any) => Promise<unknown>> = {
-  games, addGame, addCopy, removeCopy, setPlayStatus, setWishlist,
+  games, addGame, addCopy, fillUnknownCopy, removeCopy, setPlayStatus, setWishlist,
   platforms, addPlatform, renamePlatform, deletePlatform,
   accounts, addAccount, renameAccount, deleteAccount, setSteamId, importSteam,
 };

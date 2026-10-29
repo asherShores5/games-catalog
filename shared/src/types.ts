@@ -33,11 +33,14 @@ export interface Account {
  * One way a Game is owned. A Digital Copy names its Account; a Physical Copy has none. Copies
  * written before Accounts existed (ticket 03) may be Digital with no `accountId`: they still read
  * fine; the rule is enforced when a Copy is written.
+ *
+ * An Unknown Copy (from the Seed) has no Platform, Format or Account yet: `platformId` and
+ * `format` are both absent until it is filled in. See `isUnknownCopy`.
  */
 export interface Copy {
   id: string;
-  platformId: string;
-  format: Format;
+  platformId?: string;
+  format?: Format;
   accountId?: string;
   edition?: string;
   createdAt: number;

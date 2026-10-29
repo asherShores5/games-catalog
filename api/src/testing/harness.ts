@@ -23,7 +23,7 @@ export const stranger: Caller = { userId: "sub-stranger", username: "stranger" }
 
 process.env.TABLE_NAME = "test-table";
 
-const { handler, setDocClient, setSteamLibrary } = await import("../handler");
+const { handler, setDocClient, seedGames, setSteamLibrary } = await import("../handler");
 
 const db = new FakeDocClient();
 setDocClient(db);
@@ -69,5 +69,7 @@ export function harness() {
     /** Invoke the handler as `caller`. Rejects with the same Error the client would see. */
     call: (caller: Caller, fieldName: string, args: Record<string, unknown> = {}): Promise<any> =>
       handler(appSyncEvent(caller, fieldName, args)),
+    /** Run the Seed for `caller` against the in-memory table (scripts/seed.ts does this for real). */
+    seed: (caller: Caller, rows: unknown, opts?: { dryRun?: boolean }) => seedGames(caller.userId, rows, opts),
   };
 }
