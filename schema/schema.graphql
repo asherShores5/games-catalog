@@ -40,6 +40,24 @@ type Account {
   nickname: String!
 }
 
+"A descriptor of a Game (co-op, open-world...). One shared list for manual and imported Tags."
+type Tag {
+  id: ID!
+  name: String!
+}
+
+"Where a Game's Tag came from. Manual beats Import."
+enum TagSource {
+  Manual
+  Import
+}
+
+"One Game-Tag link."
+type GameTag {
+  tagId: ID!
+  source: TagSource!
+}
+
 "One way a Game is owned. platformId and accountId point into their lists, so a rename follows."
 type Copy {
   id: ID!
@@ -61,6 +79,8 @@ type Game {
   owned: Boolean!
   wishlist: Boolean!
   playStatus: PlayStatus
+  "Its Tags with their Tag source, in the order added."
+  tags: [GameTag!]!
   createdAt: Float!
   updatedAt: Float!
 }
@@ -72,6 +92,8 @@ type Query {
   platforms: [Platform!]!
   "The owner's Accounts, ordered by Store: nickname."
   accounts: [Account!]!
+  "The owner's Tags in name order, seeded with common ones on first use."
+  tags: [Tag!]!
 }
 
 type Mutation {
@@ -98,4 +120,17 @@ type Mutation {
   renameAccount(id: ID!, nickname: String!): Account!
   "Delete an Account no Copy uses. Returns its id."
   deleteAccount(id: ID!): ID!
+
+  "Add a Tag (trimmed, 1-50 characters, unique ignoring case)."
+  addTag(name: String!): Tag!
+  "Rename a Tag. Games link by id, so they show the new name."
+  renameTag(id: ID!, name: String!): Tag!
+  "Delete a Tag and remove it from every Game. Returns its id."
+  deleteTag(id: ID!): ID!
+  "Merge Tag fromId into intoId: its Games get intoId (once each, Manual winning), then fromId is deleted."
+  mergeTags(fromId: ID!, intoId: ID!): Tag!
+  "Put a Tag on a Game by hand (Tag source Manual)."
+  addGameTag(gameId: ID!, tagId: ID!): Game!
+  "Take a Tag off a Game. Remembered, so a later Import won't add it back."
+  removeGameTag(gameId: ID!, tagId: ID!): Game!
 }

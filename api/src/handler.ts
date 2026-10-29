@@ -7,8 +7,12 @@ import {
   type Account, type Copy, type Format, type Game, type Platform, type PlayStatus, type Store,
 } from "@games/shared";
 import {
+  SEED_TAGS, addManualTag, dropTag, mentionsTag, moveTag, removeGameTag as unlinkTag,
+  type GameTag, type GameTags, type Tag,
+} from "@games/shared";
+import {
   UserError, validateAccountNickname, validateEdition, validateFormat, validateGameName, validatePlatformName,
-  validateCopyAccount, validatePlayStatus, validateStore,
+  validateCopyAccount, validatePlayStatus, validateStore, validateTagName,
 } from "./rules";
 
 const TABLE = process.env.TABLE_NAME!;
@@ -65,8 +69,13 @@ const gameSk = (id: string) => `GAME#${id}`;
 const copyPrefix = (gameId: string) => `GAME#${gameId}#COPY#`;
 const isCopyRec = (rec: Rec) => String(rec.SK).includes("#COPY#");
 
-/** The Game record fields we store. Ticket 01 records lack wishlist/playStatus; they default here. */
-interface GameRec {
+/**
+ * The Game record fields we store. Ticket 01 records lack wishlist/playStatus; they default here.
+ * The Game's Tag links (and the Tags I removed) live on this record too (see Tags below). They're
+ * optional so code building a fresh Game needn't mention them; gameRec fills them, so every Game
+ * write that starts from a read carries them along.
+ */
+interface GameRec extends Partial<GameTags> {
   id: string;
   name: string;
   wishlist: boolean;
@@ -83,6 +92,8 @@ function gameRec(rec: Rec): GameRec {
     playStatus: (rec.playStatus as PlayStatus | undefined) ?? null,
     createdAt: rec.createdAt as number,
     updatedAt: rec.updatedAt as number,
+    tags: (rec.tags as GameTag[] | undefined) ?? [],
+    removedTagIds: (rec.removedTagIds as string[] | undefined) ?? [],
   };
 }
 
@@ -102,7 +113,8 @@ const oldestFirst = (a: Copy, b: Copy) => a.createdAt - b.createdAt || (a.id < b
 
 function gameOut(game: GameRec, copies: Copy[]): Game {
   const sorted = [...copies].sort(oldestFirst);
-  return { ...game, copies: sorted, owned: isOwned(sorted) };
+  const { removedTagIds: _private, ...pub } = game;
+  return { ...pub, tags: game.tags ?? [], copies: sorted, owned: isOwned(sorted) };
 }
 
 /** Next `updatedAt`: now, but always later than the last write (it doubles as a version). */
@@ -430,10 +442,163 @@ async function deleteAccount(ctx: Ctx, args: { id: string }) {
   return account.id;
 }
 
+// ---- Tags --------------------------------------------------------------------
+//
+// `SK = TAG#<id>` holds `{ id, name }`: one shared list for manual and imported Tags. Seeded once
+// per owner like Platforms (marker `META#tagsSeeded`).
+
+const tagSk = (id: string) => `TAG#${id}`;
+const TAGS_SEEDED_SK = "META#tagsSeeded";
+
+async function ensureTags(ctx: Ctx) {
+  const marker = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: TAGS_SEEDED_SK } }));
+  if (marker.Item) return;
+  try {
+    await ddb.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          { Put: { TableName: TABLE, Item: { PK: ownerPk(ctx), SK: TAGS_SEEDED_SK, at: Date.now() }, ConditionExpression: "attribute_not_exists(PK)" } },
+          ...SEED_TAGS.map((name) => {
+            const id = randomUUID();
+            return { Put: { TableName: TABLE, Item: { PK: ownerPk(ctx), SK: tagSk(id), id, name } } };
+          }),
+        ],
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name !== "TransactionCanceledException") throw e;
+  }
+}
+
+function tagOut(rec: Rec): Tag {
+  return { id: rec.id as string, name: rec.name as string };
+}
+
+async function allTags(ctx: Ctx) {
+  await ensureTags(ctx);
+  return (await queryPrefix(ctx, "TAG#")).map(tagOut).sort(byName);
+}
+
+async function tags(ctx: Ctx) {
+  return allTags(ctx);
+}
+
+async function getTag(ctx: Ctx, id: unknown): Promise<Tag> {
+  if (typeof id !== "string") throw new UserError("NotFound", "No such Tag");
+  await ensureTags(ctx);
+  const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(id) } }));
+  if (!r.Item) throw new UserError("NotFound", "No such Tag");
+  return tagOut(r.Item);
+}
+
+async function addTag(ctx: Ctx, args: { name: string }) {
+  const name = validateTagName(args.name, await allTags(ctx));
+  const tag: Tag = { id: randomUUID(), name };
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE,
+      Item: { PK: ownerPk(ctx), SK: tagSk(tag.id), ...tag },
+      ConditionExpression: "attribute_not_exists(PK)",
+    }),
+  );
+  return tag;
+}
+
+async function renameTag(ctx: Ctx, args: { id: string; name: string }) {
+  const tag = await getTag(ctx, args.id);
+  const name = validateTagName(args.name, await allTags(ctx), tag.id);
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) },
+      UpdateExpression: "SET #n = :n",
+      ConditionExpression: "attribute_exists(PK)",
+      ExpressionAttributeNames: { "#n": "name" },
+      ExpressionAttributeValues: { ":n": name },
+    }),
+  );
+  return { ...tag, name };
+}
+
+/**
+ * Rewrite every Game whose Tag state mentions `tagId` (Tag delete and merge). Runs after the Tag
+ * record is gone: addGameTag conditions on the Tag existing, so no new link can land behind the
+ * scan. Each Game write keeps the changed-since-read guard; a Game that changes meanwhile is
+ * re-read and retried.
+ */
+async function rewriteGamesMentioning(ctx: Ctx, tagId: string, change: (g: GameTags) => GameTags) {
+  const recs = (await queryPrefix(ctx, "GAME#")).filter((r) => !isCopyRec(r)).map(gameRec);
+  for (const first of recs.filter((g) => mentionsTag(tagState(g), tagId))) {
+    let game = first;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        await saveGame(ctx, game, { ...game, ...change(tagState(game)), updatedAt: nextUpdatedAt(game) });
+        break;
+      } catch (e) {
+        if (!(e instanceof UserError) || attempt === 3) throw e;
+        game = (await loadGame(ctx, game.id)).game;
+      }
+    }
+  }
+}
+
+async function deleteTag(ctx: Ctx, args: { id: string }) {
+  const tag = await getTag(ctx, args.id);
+  await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) } }));
+  await rewriteGamesMentioning(ctx, tag.id, (g) => dropTag(g, tag.id));
+  return tag.id;
+}
+
+/** Merge Tag `fromId` into `intoId`: its links move (deduped, Manual winning) and it's deleted. */
+async function mergeTags(ctx: Ctx, args: { fromId: string; intoId: string }) {
+  const from = await getTag(ctx, args.fromId);
+  const into = await getTag(ctx, args.intoId);
+  if (from.id === into.id) throw new UserError("ValidationError", "Pick two different Tags to merge");
+  await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(from.id) } }));
+  await rewriteGamesMentioning(ctx, from.id, (g) => moveTag(g, from.id, into.id));
+  return into;
+}
+
+const tagState = (game: GameRec): GameTags => ({ tags: game.tags ?? [], removedTagIds: game.removedTagIds ?? [] });
+
+/** I add a Tag to a Game: a Manual link (an imported link becomes Manual). */
+async function addGameTag(ctx: Ctx, args: { gameId: string; tagId: string }) {
+  const { game, copies } = await loadGame(ctx, args.gameId);
+  const tag = await getTag(ctx, args.tagId);
+  const next: GameRec = { ...game, ...addManualTag(tagState(game), tag.id), updatedAt: nextUpdatedAt(game) };
+  try {
+    await ddb.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          putGameIfUnchanged(ctx, game, next),
+          // The Tag must still exist when the link lands: a delete or merge may be racing us.
+          { ConditionCheck: { TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) }, ConditionExpression: "attribute_exists(PK)" } },
+        ],
+      }),
+    );
+  } catch (e) {
+    const codes = cancellationCodes(e);
+    if (codes?.[1] === "ConditionalCheckFailed") throw new UserError("NotFound", "No such Tag");
+    if (codes) throw changedMeanwhile();
+    throw e;
+  }
+  return gameOut(next, copies);
+}
+
+/** I remove a Tag from a Game. The removal is remembered so a later Import won't re-add it. */
+async function removeGameTag(ctx: Ctx, args: { gameId: string; tagId: string }) {
+  const { game, copies } = await loadGame(ctx, args.gameId);
+  if (!tagState(game).tags.some((t) => t.tagId === args.tagId)) return gameOut(game, copies);
+  const next: GameRec = { ...game, ...unlinkTag(tagState(game), args.tagId), updatedAt: nextUpdatedAt(game) };
+  await saveGame(ctx, game, next);
+  return gameOut(next, copies);
+}
+
 const RESOLVERS: Record<string, (ctx: Ctx, args: any) => Promise<unknown>> = {
   games, addGame, addCopy, removeCopy, setPlayStatus, setWishlist,
   platforms, addPlatform, renamePlatform, deletePlatform,
   accounts, addAccount, renameAccount, deleteAccount,
+  tags, addTag, renameTag, deleteTag, mergeTags, addGameTag, removeGameTag,
 };
 
 export async function handler(event: AppSyncResolverEvent<Record<string, unknown>>) {
