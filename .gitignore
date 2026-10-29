@@ -1,0 +1,9 @@
+node_modules/
+dist/
+cdk.out/
+.secrets/
+*.log
+cdk-outputs.json
+.DS_Store
+web/public/config.json
+.scratch/
