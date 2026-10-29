@@ -9,6 +9,7 @@
 // module (never statically) for the env below to take effect.
 import type { AppSyncIdentityCognito, AppSyncResolverEvent } from "aws-lambda";
 import { FakeDocClient } from "./fakeDynamo";
+import { FakeSteamLibrary } from "./fakeSteam";
 
 /** A signed-in Cognito user. `userId` is the token's `sub`. */
 export interface Caller {
@@ -22,10 +23,12 @@ export const stranger: Caller = { userId: "sub-stranger", username: "stranger" }
 
 process.env.TABLE_NAME = "test-table";
 
-const { handler, setDocClient } = await import("../handler");
+const { handler, setDocClient, setSteamLibrary } = await import("../handler");
 
 const db = new FakeDocClient();
 setDocClient(db);
+const steam = new FakeSteamLibrary();
+setSteamLibrary(steam);
 
 const QUERIES = ["games", "platforms", "accounts"];
 
@@ -53,8 +56,13 @@ export function harness() {
     owner,
     stranger,
     db,
-    /** Empty the table. */
-    reset: () => db.reset(),
+    /** The fake Steam Web API the Import calls. */
+    steam,
+    /** Empty the table and forget every fake Steam library. */
+    reset: () => {
+      db.reset();
+      steam.reset();
+    },
     event: appSyncEvent,
     /** Invoke the handler with a hand-built event (e.g. one with no identity). */
     invoke: (event: AppSyncResolverEvent<Record<string, unknown>>): Promise<any> => handler(event),

@@ -49,7 +49,11 @@ export function Games() {
     return <Platforms platforms={platforms} onChange={setPlatforms} onClose={() => setShowPlatforms(false)} />;
   }
   if (showAccounts) {
-    return <Accounts accounts={accounts} onChange={setAccounts} onClose={() => setShowAccounts(false)} />;
+    const reload = () => {
+      listGames().then(setGames, (e) => setError(String(e.message ?? e)));
+      listPlatforms().then(setPlatforms, (e) => setError(String(e.message ?? e)));
+    };
+    return <Accounts accounts={accounts} onChange={setAccounts} onImported={reload} onClose={() => setShowAccounts(false)} />;
   }
 
   return (

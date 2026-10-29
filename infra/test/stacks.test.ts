@@ -46,6 +46,38 @@ describe("auth", () => {
   });
 });
 
+describe("Steam Web API key", () => {
+  const statements = () =>
+    Object.values(app.findResources("AWS::IAM::Policy")).flatMap((p) => p.Properties.PolicyDocument.Statement as any[]);
+  const actions = (s: any) => [s.Action].flat() as string[];
+
+  it("the API Lambda can read only the one Steam key secret, by name", () => {
+    const sm = statements().filter((s) => actions(s).some((a) => a.startsWith("secretsmanager:")));
+    expect(sm).toHaveLength(1);
+    expect(actions(sm[0]).sort()).toEqual(["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]);
+    expect(JSON.stringify(sm[0].Resource)).toContain(":secret:games-catalog/steam-web-api-key-??????");
+    expect(JSON.stringify(sm[0].Resource)).not.toContain('"*"');
+  });
+
+  it("gets the secret's name, never a value, and CDK creates no secret", () => {
+    app.resourceCountIs("AWS::SecretsManager::Secret", 0);
+    app.hasResourceProperties("AWS::Lambda::Function", {
+      Environment: { Variables: Match.objectLike({ STEAM_KEY_SECRET_NAME: "games-catalog/steam-web-api-key" }) },
+    });
+  });
+
+  it("AppSync error logs leave out arguments (a Steam ID is one)", () => {
+    app.hasResourceProperties("AWS::AppSync::GraphQLApi", {
+      LogConfig: Match.objectLike({ FieldLogLevel: "ERROR", ExcludeVerboseContent: true }),
+    });
+  });
+
+  it("the Steam mutations have resolvers", () => {
+    const fields = Object.values(app.findResources("AWS::AppSync::Resolver")).map((r) => r.Properties.FieldName);
+    expect(fields).toEqual(expect.arrayContaining(["setSteamId", "importSteam"]));
+  });
+});
+
 describe("web hosting", () => {
   it("the bucket blocks all public access and only CloudFront (via OAC) may read it", () => {
     web.hasResourceProperties("AWS::S3::Bucket", {

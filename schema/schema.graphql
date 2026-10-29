@@ -38,6 +38,8 @@ type Account {
   id: ID!
   store: Store!
   nickname: String!
+  "Whether a Steam ID is set (Steam Accounts only). The Steam ID itself is never returned."
+  hasSteamId: Boolean!
 }
 
 "One way a Game is owned. platformId and accountId point into their lists, so a rename follows."
@@ -61,8 +63,22 @@ type Game {
   owned: Boolean!
   wishlist: Boolean!
   playStatus: PlayStatus
+  "The Steam app this Game matches, once a Steam Import created or matched it."
+  steamAppId: Int
   createdAt: Float!
   updatedAt: Float!
+}
+
+"What an Import from Steam did."
+type SteamImportSummary {
+  "Games that got a new Copy on the Account."
+  added: Int!
+  "Library games that already had a Copy on the Account."
+  alreadyPresent: Int!
+  "Names of the added Games, in name order."
+  addedNames: [String!]!
+  "Library entries that couldn't be saved this time; re-running retries them."
+  failed: Int!
 }
 
 type Query {
@@ -98,4 +114,8 @@ type Mutation {
   renameAccount(id: ID!, nickname: String!): Account!
   "Delete an Account no Copy uses. Returns its id."
   deleteAccount(id: ID!): ID!
+  "Set (or clear, with null) a Steam Account's Steam ID: the 17-digit SteamID64."
+  setSteamId(accountId: ID!, steamId: String): Account!
+  "Import the Steam Account's library: adds Games and Digital PC Copies, never removes or edits manual ones."
+  importSteam(accountId: ID!): SteamImportSummary!
 }

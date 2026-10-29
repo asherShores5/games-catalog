@@ -18,13 +18,15 @@ export const STORES: readonly Store[] = ["Steam", "Epic", "GOG", "PSN", "Xbox", 
 
 /**
  * One login on a Store, with a nickname ("Steam: main"). The Store is fixed once created; only
- * the nickname can be renamed. Copies point at it by id, so a rename follows. Store-specific
- * data (a Steam Account's Steam ID, ticket 07) will be optional fields here.
+ * the nickname can be renamed. Copies point at it by id, so a rename follows. A Steam Account
+ * may hold a Steam ID for the Import; it is private Account data that the API never returns,
+ * so the client only learns whether one is set.
  */
 export interface Account {
   id: string;
   store: Store;
   nickname: string;
+  hasSteamId: boolean;
 }
 
 /**
@@ -51,6 +53,8 @@ export interface Game {
   owned: boolean;
   wishlist: boolean;
   playStatus: PlayStatus | null;
+  /** The Steam app this Game matches, once a Steam Import created or matched it. Public data. */
+  steamAppId?: number;
   createdAt: number;
   updatedAt: number;
 }

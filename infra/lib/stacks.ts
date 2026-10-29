@@ -7,12 +7,18 @@ import {
   aws_lambda as lambda,
   aws_lambda_nodejs as nodejs,
   aws_logs as logs,
+  aws_secretsmanager as secretsmanager,
 } from "aws-cdk-lib";
 import type { Construct } from "constructs";
 
 /** Served by WebStack (lib/hosting.ts). */
 export const APP_DOMAIN = "games.ashershores.com";
 const ROOT = path.join(__dirname, "..", "..");
+/**
+ * The Steam Web API key (plain SecretString). Created by hand, never by CDK, so the key value is
+ * in no template or repo (docs/first-deploy.md). Only its name is here.
+ */
+export const STEAM_KEY_SECRET_NAME = "games-catalog/steam-web-api-key";
 
 /** Data, auth and API. Hosting: CertStack/WebStack (lib/hosting.ts). Deploy CI: CiStack (lib/ci.ts). */
 export class AppStack extends Stack {
@@ -69,12 +75,15 @@ export class AppStack extends Stack {
       runtime: lambda.Runtime.NODEJS_22_X,
       architecture: lambda.Architecture.ARM_64,
       memorySize: 256,
-      timeout: Duration.seconds(10),
-      environment: { TABLE_NAME: table.tableName },
+      // A Steam Import writes one transaction per game; AppSync waits at most 30 s for a resolver.
+      timeout: Duration.seconds(25),
+      environment: { TABLE_NAME: table.tableName, STEAM_KEY_SECRET_NAME },
       bundling: { minify: true, sourceMap: true, format: nodejs.OutputFormat.ESM, target: "node22" },
       logGroup: new logs.LogGroup(this, "ApiLogs", { retention: logs.RetentionDays.TWO_WEEKS, removalPolicy: RemovalPolicy.DESTROY }),
     });
     table.grantReadWriteData(fn);
+    // Read access to the one Steam key secret, nothing else in Secrets Manager.
+    secretsmanager.Secret.fromSecretNameV2(this, "SteamKey", STEAM_KEY_SECRET_NAME).grantRead(fn);
 
     const api = new appsync.GraphqlApi(this, "Api", {
       name: "games-catalog",
@@ -82,7 +91,8 @@ export class AppStack extends Stack {
       authorizationConfig: {
         defaultAuthorization: { authorizationType: appsync.AuthorizationType.USER_POOL, userPoolConfig: { userPool } },
       },
-      logConfig: { fieldLogLevel: appsync.FieldLogLevel.ERROR, retention: logs.RetentionDays.TWO_WEEKS },
+      // No verbose content: an erroring field would otherwise log its arguments (e.g. a Steam ID).
+      logConfig: { fieldLogLevel: appsync.FieldLogLevel.ERROR, excludeVerboseContent: true, retention: logs.RetentionDays.TWO_WEEKS },
     });
     this.userPool = userPool;
     this.client = client;
@@ -90,7 +100,7 @@ export class AppStack extends Stack {
 
     const ds = api.addLambdaDataSource("ApiDs", fn);
     for (const field of ["games", "platforms", "accounts"]) ds.createResolver(`Q${field}`, { typeName: "Query", fieldName: field });
-    for (const field of ["addGame", "addCopy", "removeCopy", "setPlayStatus", "setWishlist", "addPlatform", "renamePlatform", "deletePlatform", "addAccount", "renameAccount", "deleteAccount"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
+    for (const field of ["addGame", "addCopy", "removeCopy", "setPlayStatus", "setWishlist", "addPlatform", "renamePlatform", "deletePlatform", "addAccount", "renameAccount", "deleteAccount", "setSteamId", "importSteam"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
 
     // The web app's /config.json takes these values (see web/public/config.example.json).
     new CfnOutput(this, "Region", { value: this.region });

@@ -32,7 +32,7 @@ describe("Accounts", () => {
 
   it("I can rename an Account; its Store stays", async () => {
     const a = await h.call(h.owner, "addAccount", { store: "Steam", nickname: "mian" });
-    expect(await h.call(h.owner, "renameAccount", { id: a.id, nickname: "main" })).toEqual({ id: a.id, store: "Steam", nickname: "main" });
+    expect(await h.call(h.owner, "renameAccount", { id: a.id, nickname: "main" })).toEqual({ id: a.id, store: "Steam", nickname: "main", hasSteamId: false });
     expect(labels(await h.call(h.owner, "accounts"))).toEqual(["Steam: main"]);
   });
 

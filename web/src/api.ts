@@ -1,11 +1,11 @@
-import type { Account, Format, Game, Platform, PlayStatus, Store } from "@games/shared";
+import type { Account, Format, Game, Platform, PlayStatus, SteamImportSummary, Store } from "@games/shared";
 import { freshTokens } from "./auth";
 import { getConfig } from "./config";
 
 const COPY = `id platformId format accountId edition createdAt`;
-const GAME = `id name copies { ${COPY} } owned wishlist playStatus createdAt updatedAt`;
+const GAME = `id name copies { ${COPY} } owned wishlist playStatus steamAppId createdAt updatedAt`;
 const PLATFORM = `id name`;
-const ACCOUNT = `id store nickname`;
+const ACCOUNT = `id store nickname hasSteamId`;
 
 export const Q = {
   games: `query { games { ${GAME} } }`,
@@ -23,6 +23,8 @@ export const Q = {
   addAccount: `mutation($store: Store!, $nickname: String!) { addAccount(store: $store, nickname: $nickname) { ${ACCOUNT} } }`,
   renameAccount: `mutation($id: ID!, $nickname: String!) { renameAccount(id: $id, nickname: $nickname) { ${ACCOUNT} } }`,
   deleteAccount: `mutation($id: ID!) { deleteAccount(id: $id) }`,
+  setSteamId: `mutation($accountId: ID!, $steamId: String) { setSteamId(accountId: $accountId, steamId: $steamId) { ${ACCOUNT} } }`,
+  importSteam: `mutation($accountId: ID!) { importSteam(accountId: $accountId) { added alreadyPresent addedNames failed } }`,
 };
 
 export async function gql<T = any>(query: string, variables: object = {}): Promise<T> {
@@ -41,6 +43,7 @@ export async function gql<T = any>(query: string, variables: object = {}): Promi
 // GraphQL returns null for a missing Edition or Account; the shared type uses undefined.
 const fixGame = (g: Game): Game => ({
   ...g,
+  steamAppId: g.steamAppId ?? undefined,
   copies: g.copies.map((c) => ({ ...c, edition: c.edition ?? undefined, accountId: c.accountId ?? undefined })),
 });
 
@@ -67,3 +70,8 @@ export const addAccount = async (store: Store, nickname: string) =>
 export const renameAccount = async (id: string, nickname: string) =>
   (await gql<{ renameAccount: Account }>(Q.renameAccount, { id, nickname })).renameAccount;
 export const deleteAccount = async (id: string) => (await gql<{ deleteAccount: string }>(Q.deleteAccount, { id })).deleteAccount;
+/** Set or (with null) clear a Steam Account's Steam ID. The API never sends it back. */
+export const setSteamId = async (accountId: string, steamId: string | null) =>
+  (await gql<{ setSteamId: Account }>(Q.setSteamId, { accountId, steamId })).setSteamId;
+export const importSteam = async (accountId: string) =>
+  (await gql<{ importSteam: SteamImportSummary }>(Q.importSteam, { accountId })).importSteam;

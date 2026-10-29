@@ -2,13 +2,13 @@
 // @games/shared; this file turns their "can't be one" answers into UserErrors.
 import {
   ACCOUNT_NICKNAME_MAX, EDITION_MAX, FORMATS, GAME_NAME_MAX, PLATFORM_NAME_MAX, PLAY_STATUSES, STORES,
-  accountLabel, cleanAccountNickname, needsAccount, cleanEdition, cleanGameName, cleanPlatformName, sameAccount, samePlatformName,
+  accountLabel, cleanAccountNickname, cleanSteamId, needsAccount, cleanEdition, cleanGameName, cleanPlatformName, sameAccount, samePlatformName,
   type Account, type Format, type Platform, type PlayStatus, type Store,
 } from "@games/shared";
 
 /** An error the caller caused. The client sees "<type>: <message>"; anything else is InternalError. */
 export class UserError extends Error {
-  constructor(public type: "ValidationError" | "NotFound" | "Conflict", message: string) {
+  constructor(public type: "ValidationError" | "NotFound" | "Conflict" | "SteamError", message: string) {
     super(message);
   }
 }
@@ -77,4 +77,14 @@ export function validateCopyAccount(format: Format, raw: unknown): string | unde
   }
   if (!needsAccount(format) && accountId !== undefined) throw new UserError("ValidationError", "A Physical Copy can't have an Account");
   return accountId;
+}
+
+/** A Steam ID for a Steam Account, or undefined to clear it (null or ""). Only Steam Accounts have one. */
+export function validateSteamId(store: Store, raw: unknown): string | undefined {
+  if (store !== "Steam") throw new UserError("ValidationError", "Only a Steam Account has a Steam ID");
+  if (raw === null || raw === undefined || (typeof raw === "string" && raw.trim() === "")) return undefined;
+  const id = cleanSteamId(raw);
+  // The message never echoes the input: it is Account data and errors can reach logs.
+  if (id === undefined) throw new UserError("ValidationError", "A Steam ID is the 17-digit number starting 7656119 on your Steam profile");
+  return id;
 }

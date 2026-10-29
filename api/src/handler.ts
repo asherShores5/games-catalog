@@ -3,13 +3,17 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { AppSyncIdentityCognito, AppSyncResolverEvent } from "aws-lambda";
 import {
-  SEED_PLATFORMS, accountLabel, afterCopyAdded, byAccountLabel, byName, canWishlist, isOwned,
-  type Account, type Copy, type Format, type Game, type Platform, type PlayStatus, type Store,
+  SEED_PLATFORMS, STEAM_PLATFORM, accountLabel, afterCopyAdded, byAccountLabel, byName, canWishlist, isOwned,
+  samePlatformName, type Account, type Copy, type Format, type Game, type Platform, type PlayStatus,
+  type SteamImportSummary, type Store,
 } from "@games/shared";
 import {
   UserError, validateAccountNickname, validateEdition, validateFormat, validateGameName, validatePlatformName,
-  validateCopyAccount, validatePlayStatus, validateStore,
+  validateCopyAccount, validatePlayStatus, validateSteamId, validateStore,
 } from "./rules";
+import { SteamError, type SteamLibrary } from "./steam";
+import { planSteamImport, type ImportStep } from "./steamImport";
+import { secretsManagerKey, steamWebApi } from "./steamWebApi";
 
 const TABLE = process.env.TABLE_NAME!;
 
@@ -22,6 +26,20 @@ let ddb: DocClient = DynamoDBDocumentClient.from(new DynamoDBClient({}), {
 /** Test seam: swap the document client (see src/testing/harness.ts). Production never calls this. */
 export function setDocClient(client: DocClient) {
   ddb = client;
+}
+
+// The real Steam client is built on first Import, so other resolvers never touch Secrets Manager.
+// The key's secret NAME comes from the environment; the key itself only ever lives in memory.
+let steamLibrary: SteamLibrary | undefined;
+
+/** Test seam: swap the Steam client (see src/testing/fakeSteam.ts). Production never calls this. */
+export function setSteamLibrary(library: SteamLibrary) {
+  steamLibrary = library;
+}
+
+function steam(): SteamLibrary {
+  steamLibrary ??= steamWebApi({ getKey: secretsManagerKey(process.env.STEAM_KEY_SECRET_NAME) });
+  return steamLibrary;
 }
 
 /** The signed-in caller. Every record key is derived from `userId`, never from arguments. */
@@ -71,6 +89,8 @@ interface GameRec {
   name: string;
   wishlist: boolean;
   playStatus: PlayStatus | null;
+  /** Set when a Steam Import created or matched this Game. */
+  steamAppId?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -81,6 +101,7 @@ function gameRec(rec: Rec): GameRec {
     name: rec.name as string,
     wishlist: rec.wishlist === true,
     playStatus: (rec.playStatus as PlayStatus | undefined) ?? null,
+    steamAppId: rec.steamAppId as number | undefined,
     createdAt: rec.createdAt as number,
     updatedAt: rec.updatedAt as number,
   };
@@ -182,24 +203,44 @@ async function addCopy(
 
   const copy: Copy = { id: randomUUID(), platformId: platform.id, format, accountId: account?.id, edition, createdAt: Date.now() };
   const next: GameRec = { ...game, ...afterCopyAdded(game), updatedAt: nextUpdatedAt(game) };
-  // The Platform (and Account) must still exist when the Copy lands: a delete may be racing us.
+  await writeCopy(ctx, { read: game, next, copy });
+  return gameOut(next, [...copies, copy]);
+}
+
+/**
+ * Write a Copy and its Game in one transaction: the Game record is rewritten only if unchanged
+ * since `read` (or created, when there's no `read`), and the Copy's Platform and Account must
+ * still exist, since a delete may be racing us. Validation is the caller's job (rules.ts).
+ * `copyExtra` holds stored-only Copy fields (an Import's `steamAppId`).
+ */
+async function writeCopy(ctx: Ctx, w: { read?: GameRec; next: GameRec; copy: Copy; copyExtra?: Rec }) {
+  const { read, next, copy } = w;
   const mustExist = (SK: string) => ({
     ConditionCheck: { TableName: TABLE, Key: { PK: ownerPk(ctx), SK }, ConditionExpression: "attribute_exists(PK)" },
   });
+  const gameWrite = read
+    ? putGameIfUnchanged(ctx, read, next)
+    : {
+        Put: {
+          TableName: TABLE,
+          Item: { PK: ownerPk(ctx), SK: gameSk(next.id), ...next, playStatus: next.playStatus ?? undefined },
+          ConditionExpression: "attribute_not_exists(PK)",
+        },
+      };
   try {
     await ddb.send(
       new TransactWriteCommand({
         TransactItems: [
-          putGameIfUnchanged(ctx, game, next),
+          gameWrite,
           {
             Put: {
               TableName: TABLE,
-              Item: { PK: ownerPk(ctx), SK: copyPrefix(game.id) + copy.id, gameId: game.id, ...copy },
+              Item: { PK: ownerPk(ctx), SK: copyPrefix(next.id) + copy.id, gameId: next.id, ...w.copyExtra, ...copy },
               ConditionExpression: "attribute_not_exists(PK)",
             },
           },
-          mustExist(platformSk(platform.id)),
-          ...(account ? [mustExist(accountSk(account.id))] : []),
+          mustExist(platformSk(copy.platformId)),
+          ...(copy.accountId ? [mustExist(accountSk(copy.accountId))] : []),
         ],
       }),
     );
@@ -210,7 +251,6 @@ async function addCopy(
     if (codes) throw changedMeanwhile();
     throw e;
   }
-  return gameOut(next, [...copies, copy]);
 }
 
 async function removeCopy(ctx: Ctx, args: { gameId: string; copyId: string }) {
@@ -363,13 +403,13 @@ async function deletePlatform(ctx: Ctx, args: { id: string }) {
 //
 // `SK = ACCOUNT#<id>`. Copies point at an Account by id, so renaming it never touches a Copy.
 // The Store is fixed at creation (Imports and a Steam ID depend on it); only the nickname renames.
-// Store-specific fields (ticket 07's Steam ID) go on this same record; accountOut picks the
-// public fields, so a later private field doesn't leak by accident.
+// Store-specific fields go on this same record; accountOut picks the public fields, so a private
+// field doesn't leak by accident. A Steam Account's `steamId` is one: only `hasSteamId` goes out.
 
 const accountSk = (id: string) => `ACCOUNT#${id}`;
 
 function accountOut(rec: Rec): Account {
-  return { id: rec.id as string, store: rec.store as Store, nickname: rec.nickname as string };
+  return { id: rec.id as string, store: rec.store as Store, nickname: rec.nickname as string, hasSteamId: typeof rec.steamId === "string" };
 }
 
 async function allAccounts(ctx: Ctx) {
@@ -380,21 +420,26 @@ async function accounts(ctx: Ctx) {
   return allAccounts(ctx);
 }
 
-async function getAccount(ctx: Ctx, id: unknown): Promise<Account> {
+/** The stored Account record, private fields included. Never return it to a client as is. */
+async function getAccountRec(ctx: Ctx, id: unknown): Promise<Rec> {
   if (typeof id !== "string") throw new UserError("NotFound", "No such Account");
   const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: accountSk(id) } }));
   if (!r.Item) throw new UserError("NotFound", "No such Account");
-  return accountOut(r.Item);
+  return r.Item;
+}
+
+async function getAccount(ctx: Ctx, id: unknown): Promise<Account> {
+  return accountOut(await getAccountRec(ctx, id));
 }
 
 async function addAccount(ctx: Ctx, args: { store: string; nickname: string }) {
   const store = validateStore(args.store);
   const nickname = validateAccountNickname(args.nickname, store, await allAccounts(ctx));
-  const account: Account = { id: randomUUID(), store, nickname };
+  const account: Account = { id: randomUUID(), store, nickname, hasSteamId: false };
   await ddb.send(
     new PutCommand({
       TableName: TABLE,
-      Item: { PK: ownerPk(ctx), SK: accountSk(account.id), ...account },
+      Item: { PK: ownerPk(ctx), SK: accountSk(account.id), id: account.id, store, nickname },
       ConditionExpression: "attribute_not_exists(PK)",
     }),
   );
@@ -416,6 +461,21 @@ async function renameAccount(ctx: Ctx, args: { id: string; nickname: string }) {
   return { ...account, nickname };
 }
 
+async function setSteamId(ctx: Ctx, args: { accountId: string; steamId?: string | null }) {
+  const account = await getAccount(ctx, args.accountId);
+  const steamId = validateSteamId(account.store, args.steamId);
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { PK: ownerPk(ctx), SK: accountSk(account.id) },
+      ...(steamId === undefined
+        ? { UpdateExpression: "REMOVE steamId", ConditionExpression: "attribute_exists(PK)" }
+        : { UpdateExpression: "SET steamId = :s", ConditionExpression: "attribute_exists(PK)", ExpressionAttributeValues: { ":s": steamId } }),
+    }),
+  );
+  return { ...account, hasSteamId: steamId !== undefined };
+}
+
 async function deleteAccount(ctx: Ctx, args: { id: string }) {
   const account = await getAccount(ctx, args.id);
   // Same scan as deletePlatform; addCopy conditions on the Account still existing.
@@ -430,10 +490,118 @@ async function deleteAccount(ctx: Ctx, args: { id: string }) {
   return account.id;
 }
 
+// ---- Steam Import ------------------------------------------------------------
+//
+// importSteam reads the Account's library through `steam()` and applies planSteamImport's
+// steps. Every step is its own transaction through writeCopy (same guards as addCopy), so an
+// Import that times out or hits a conflict part-way is safe to re-run: matching by Steam app ID
+// makes the finished steps "already present". Imported Copies store `steamAppId`; manual Copies
+// are never written by an Import.
+
+const IMPORT_CONCURRENCY = 8;
+
+/** The Platform Steam Copies land on: the owner's "PC", re-created if they deleted it. */
+async function steamPlatform(ctx: Ctx): Promise<Platform> {
+  const pc = (await allPlatforms(ctx)).find((p) => samePlatformName(p.name, STEAM_PLATFORM));
+  return pc ?? addPlatform(ctx, { name: STEAM_PLATFORM });
+}
+
+function steamUserError(e: SteamError): UserError {
+  return new UserError("SteamError", e.message);
+}
+
+const gameRecOf = (g: Game): GameRec => ({
+  id: g.id, name: g.name, wishlist: g.wishlist, playStatus: g.playStatus, steamAppId: g.steamAppId, createdAt: g.createdAt, updatedAt: g.updatedAt,
+});
+
+type StepOutcome = "added" | "present";
+
+/** Apply one plan step. Returns what it did and the Game it concerns. */
+async function applyStep(
+  ctx: Ctx,
+  step: ImportStep,
+  env: { games: Map<string, Game>; platform: Platform; accountId: string },
+): Promise<{ outcome: StepOutcome; gameId: string; name: string }> {
+  const newCopy = (): Copy => ({ id: randomUUID(), platformId: env.platform.id, format: "Digital", accountId: env.accountId, createdAt: Date.now() });
+  const copyExtra = { steamAppId: step.app.appId };
+
+  if (step.kind === "newGame") {
+    const now = Date.now();
+    const next: GameRec = { id: randomUUID(), name: step.name, wishlist: false, playStatus: null, steamAppId: step.app.appId, createdAt: now, updatedAt: now };
+    await writeCopy(ctx, { next, copy: newCopy(), copyExtra });
+    return { outcome: "added", gameId: next.id, name: next.name };
+  }
+
+  const read = gameRecOf(env.games.get(step.gameId)!);
+  const steamAppId = step.link ? step.app.appId : read.steamAppId;
+  if (step.kind === "present") {
+    // Nothing to add. A manual Game matched by name still learns its Steam app ID, so later
+    // Imports (and ticket 08's Tags) find it by ID.
+    if (step.link) await saveGame(ctx, read, { ...read, steamAppId, updatedAt: nextUpdatedAt(read) });
+    return { outcome: "present", gameId: read.id, name: read.name };
+  }
+  const next: GameRec = { ...read, ...afterCopyAdded(read), steamAppId, updatedAt: nextUpdatedAt(read) };
+  await writeCopy(ctx, { read, next, copy: newCopy(), copyExtra });
+  return { outcome: "added", gameId: read.id, name: read.name };
+}
+
+/** Run `fn` over `items`, at most `limit` at a time. */
+async function inPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>) {
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) await fn(items[next++]);
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+}
+
+async function importSteam(ctx: Ctx, args: { accountId: string }): Promise<SteamImportSummary> {
+  const rec = await getAccountRec(ctx, args.accountId);
+  const account = accountOut(rec);
+  if (account.store !== "Steam") throw new UserError("ValidationError", "Only a Steam Account can import from Steam");
+  const steamId = rec.steamId;
+  if (typeof steamId !== "string") throw new UserError("ValidationError", `Set a Steam ID on "${accountLabel(account)}" first`);
+  // Same rule every Digital Copy goes through (rules.ts); the Account itself is checked in writeCopy.
+  const accountId = validateCopyAccount("Digital", account.id)!;
+
+  let library;
+  try {
+    library = await steam().ownedGames(steamId);
+  } catch (e) {
+    if (e instanceof SteamError) throw steamUserError(e);
+    throw e;
+  }
+
+  const platform = await steamPlatform(ctx);
+  const games = await allGames(ctx);
+  const steps = planSteamImport(library, games, accountId);
+  const env = { games: new Map(games.map((g) => [g.id, g])), platform, accountId };
+
+  const summary: SteamImportSummary = { added: 0, alreadyPresent: 0, failed: 0, addedNames: [] };
+  // Each step touches a different Game (planSteamImport claims a Game for at most one app), so
+  // steps can run side by side without racing each other's `updatedAt` guard.
+  await inPool(steps, IMPORT_CONCURRENCY, async (step) => {
+    try {
+      const r = await applyStep(ctx, step, env);
+      if (r.outcome === "added") {
+        summary.added++;
+        summary.addedNames.push(r.name);
+      } else summary.alreadyPresent++;
+      // Ticket 08: per-Game enrichment (store Categories/Genres -> Tags) hooks in here, for
+      // added and present Games alike, keyed by step.app.appId and r.gameId.
+    } catch (e) {
+      // Logged without Steam data: these are DynamoDB or our own errors, never the Steam ID.
+      if (!(e instanceof UserError)) console.error(e);
+      summary.failed++;
+    }
+  });
+  summary.addedNames.sort((a, b) => byName({ name: a }, { name: b }));
+  return summary;
+}
+
 const RESOLVERS: Record<string, (ctx: Ctx, args: any) => Promise<unknown>> = {
   games, addGame, addCopy, removeCopy, setPlayStatus, setWishlist,
   platforms, addPlatform, renamePlatform, deletePlatform,
-  accounts, addAccount, renameAccount, deleteAccount,
+  accounts, addAccount, renameAccount, deleteAccount, setSteamId, importSteam,
 };
 
 export async function handler(event: AppSyncResolverEvent<Record<string, unknown>>) {
