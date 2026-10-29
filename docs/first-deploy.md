@@ -107,6 +107,32 @@ Push `main` first (tests only), then fast-forward `prod` to it. The `prod` push 
 and then `npm run deploy` as the deploy role. The role trusts only this repo's `prod` branch and
 can only assume the CDK bootstrap roles.
 
+## 9. Steam Web API key (for "Import from Steam")
+
+The API Lambda reads the key from one Secrets Manager secret, `games-catalog/steam-web-api-key`,
+in the app's region (us-west-1). CDK never creates it, so the key is in no template, log or file
+here. Until it exists, an Import fails with "The Steam Web API key isn't set up yet".
+
+Get a key at https://steamcommunity.com/dev/apikey (signed in to Steam), then store it as a plain
+string. `read -s` keeps it out of the shell history and the screen; a temp file keeps it out of
+the process list:
+
+```sh
+read -rs -p "Steam Web API key: " STEAM_KEY; echo
+KEYFILE=$(mktemp) && chmod 600 "$KEYFILE" && printf '%s' "$STEAM_KEY" > "$KEYFILE"
+aws secretsmanager create-secret --region us-west-1 --name games-catalog/steam-web-api-key \
+  --secret-string "file://$KEYFILE"
+rm -f "$KEYFILE"; unset STEAM_KEY
+```
+
+To replace the key later, use `put-secret-value --secret-id games-catalog/steam-web-api-key` the
+same way. A warm Lambda keeps the old key until it restarts (minutes to hours); redeploying
+forces it.
+
+Then in the app: Accounts > a Steam Account > Set Steam ID (the 17-digit number from your Steam
+profile URL or Account details, starting 7656119), and in Steam's privacy settings set Game
+details to Public. The Steam ID is stored on the Account record only; the app never shows it back.
+
 ## Context and env keys (reference)
 
 Context key (`-c key=value`) or env var; context wins. Read by `infra/lib/config.ts` and `infra/bin/app.ts`.

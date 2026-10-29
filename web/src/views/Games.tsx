@@ -64,7 +64,11 @@ export function Games() {
     return <Tags tags={tags} onChange={setTags} onGamesChanged={reloadGames} onClose={() => setShowTags(false)} />;
   }
   if (showAccounts) {
-    return <Accounts accounts={accounts} onChange={setAccounts} onClose={() => setShowAccounts(false)} />;
+    const reload = () => {
+      listGames().then(setGames, (e) => setError(String(e.message ?? e)));
+      listPlatforms().then(setPlatforms, (e) => setError(String(e.message ?? e)));
+    };
+    return <Accounts accounts={accounts} onChange={setAccounts} onImported={reload} onClose={() => setShowAccounts(false)} />;
   }
 
   return (

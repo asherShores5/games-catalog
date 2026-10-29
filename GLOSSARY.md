@@ -28,4 +28,6 @@
 
 **Import**: Pulling a Store Account's library (and its Tags) into the catalog. Only adds; never removes manual Copies or Tags.
 
+**Steam ID**: The 17-digit SteamID64 a Steam Account's Import reads. Private Account data: stored on the Account, never shown back, never in the repo.
+
 **Seed**: The one-time load of the Notion "Gaming catalog" page.

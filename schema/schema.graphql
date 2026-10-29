@@ -38,6 +38,8 @@ type Account {
   id: ID!
   store: Store!
   nickname: String!
+  "Whether a Steam ID is set (Steam Accounts only). The Steam ID itself is never returned."
+  hasSteamId: Boolean!
 }
 
 "A descriptor of a Game (co-op, open-world...). One shared list for manual and imported Tags."
@@ -79,10 +81,24 @@ type Game {
   owned: Boolean!
   wishlist: Boolean!
   playStatus: PlayStatus
+  "The Steam app this Game matches, once a Steam Import created or matched it."
+  steamAppId: Int
   "Its Tags with their Tag source, in the order added."
   tags: [GameTag!]!
   createdAt: Float!
   updatedAt: Float!
+}
+
+"What an Import from Steam did."
+type SteamImportSummary {
+  "Games that got a new Copy on the Account."
+  added: Int!
+  "Library games that already had a Copy on the Account."
+  alreadyPresent: Int!
+  "Names of the added Games, in name order."
+  addedNames: [String!]!
+  "Library entries that couldn't be saved this time; re-running retries them."
+  failed: Int!
 }
 
 type Query {
@@ -122,6 +138,10 @@ type Mutation {
   renameAccount(id: ID!, nickname: String!): Account!
   "Delete an Account no Copy uses. Returns its id."
   deleteAccount(id: ID!): ID!
+  "Set (or clear, with null) a Steam Account's Steam ID: the 17-digit SteamID64."
+  setSteamId(accountId: ID!, steamId: String): Account!
+  "Import the Steam Account's library: adds Games and Digital PC Copies, never removes or edits manual ones."
+  importSteam(accountId: ID!): SteamImportSummary!
 
   "Add a Tag (trimmed, 1-50 characters, unique ignoring case)."
   addTag(name: String!): Tag!

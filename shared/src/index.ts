@@ -8,3 +8,4 @@ export * from "./tag";
 export * from "./copy";
 export * from "./ownership";
 export * from "./account";
+export * from "./steam";
