@@ -10,9 +10,9 @@
 
 **Platform**: The hardware a Copy runs on (PC, PS5, Switch…). An editable list. Not a Tag.
 
-**Store**: Where Digital Copies are bought (Steam, Epic, PSN…).
+**Store**: Where Digital Copies are bought: Steam, Epic, GOG, PSN, Xbox, Nintendo or Other. A fixed list, not editable.
 
-**Account**: One login on a Store, with a nickname, e.g. "Steam: main". Physical Copies have no Account.
+**Account**: One login on a Store, with a nickname, e.g. "Steam: main". Every Digital Copy names one; Physical Copies have none. The Store is fixed once created; the nickname can be renamed.
 
 **Owned**: A Game with at least one Copy. Never set by hand.
 

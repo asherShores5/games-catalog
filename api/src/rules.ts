@@ -1,9 +1,9 @@
 // Pure validation rules, kept free of AWS calls. Domain rules shared with the web app live in
 // @games/shared; this file turns their "can't be one" answers into UserErrors.
 import {
-  EDITION_MAX, FORMATS, GAME_NAME_MAX, PLATFORM_NAME_MAX, PLAY_STATUSES,
-  cleanEdition, cleanGameName, cleanPlatformName, samePlatformName,
-  type Format, type Platform, type PlayStatus,
+  ACCOUNT_NICKNAME_MAX, EDITION_MAX, FORMATS, GAME_NAME_MAX, PLATFORM_NAME_MAX, PLAY_STATUSES, STORES,
+  accountLabel, cleanAccountNickname, needsAccount, cleanEdition, cleanGameName, cleanPlatformName, sameAccount, samePlatformName,
+  type Account, type Format, type Platform, type PlayStatus, type Store,
 } from "@games/shared";
 
 /** An error the caller caused. The client sees "<type>: <message>"; anything else is InternalError. */
@@ -47,4 +47,34 @@ export function validatePlayStatus(raw: unknown): PlayStatus | null {
     throw new UserError("ValidationError", `Play status must be ${PLAY_STATUSES.join(", ")} or none`);
   }
   return raw as PlayStatus;
+}
+
+export function validateStore(raw: unknown): Store {
+  if (!STORES.includes(raw as Store)) throw new UserError("ValidationError", `Store must be one of ${STORES.join(", ")}`);
+  return raw as Store;
+}
+
+/** A new or renamed Account nickname: valid, and not another Account on the same Store (case-insensitive). */
+export function validateAccountNickname(raw: unknown, store: Store, existing: Account[], selfId?: string): string {
+  const nickname = cleanAccountNickname(raw);
+  if (nickname === undefined) {
+    throw new UserError("ValidationError", `Account nickname must be 1-${ACCOUNT_NICKNAME_MAX} characters`);
+  }
+  const clash = existing.find((a) => a.id !== selfId && sameAccount(a, { store, nickname }));
+  if (clash) throw new UserError("ValidationError", `There is already an Account "${accountLabel(clash)}"`);
+  return nickname;
+}
+
+/**
+ * The Account a new Copy names, by id: required for Digital, refused for Physical. Missing, null
+ * or "" all mean none. Whether the Account exists is the caller's check.
+ */
+export function validateCopyAccount(format: Format, raw: unknown): string | undefined {
+  const accountId = raw === null || raw === undefined || raw === "" ? undefined : raw;
+  if (accountId !== undefined && typeof accountId !== "string") throw new UserError("ValidationError", "accountId must be an id");
+  if (needsAccount(format) && accountId === undefined) {
+    throw new UserError("ValidationError", "A Digital Copy needs an Account; add one under Accounts first if needed");
+  }
+  if (!needsAccount(format) && accountId !== undefined) throw new UserError("ValidationError", "A Physical Copy can't have an Account");
+  return accountId;
 }

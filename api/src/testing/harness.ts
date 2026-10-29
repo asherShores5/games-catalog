@@ -27,7 +27,7 @@ const { handler, setDocClient } = await import("../handler");
 const db = new FakeDocClient();
 setDocClient(db);
 
-const QUERIES = ["games", "platforms"];
+const QUERIES = ["games", "platforms", "accounts"];
 
 /** AppSync-shaped resolver event for one caller invoking one field. */
 export function appSyncEvent(caller: Caller, fieldName: string, args: Record<string, unknown> = {}) {

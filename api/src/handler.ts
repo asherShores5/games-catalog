@@ -3,11 +3,12 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { AppSyncIdentityCognito, AppSyncResolverEvent } from "aws-lambda";
 import {
-  SEED_PLATFORMS, afterCopyAdded, byName, canWishlist, isOwned,
-  type Copy, type Format, type Game, type Platform, type PlayStatus,
+  SEED_PLATFORMS, accountLabel, afterCopyAdded, byAccountLabel, byName, canWishlist, isOwned,
+  type Account, type Copy, type Format, type Game, type Platform, type PlayStatus, type Store,
 } from "@games/shared";
 import {
-  UserError, validateEdition, validateFormat, validateGameName, validatePlatformName, validatePlayStatus,
+  UserError, validateAccountNickname, validateEdition, validateFormat, validateGameName, validatePlatformName,
+  validateCopyAccount, validatePlayStatus, validateStore,
 } from "./rules";
 
 const TABLE = process.env.TABLE_NAME!;
@@ -90,6 +91,8 @@ function copyOut(rec: Rec): Copy {
     id: rec.id as string,
     platformId: rec.platformId as string,
     format: rec.format as Format,
+    // Absent on Physical Copies, and on Digital Copies saved before Accounts existed.
+    accountId: rec.accountId as string | undefined,
     edition: rec.edition as string | undefined,
     createdAt: rec.createdAt as number,
   };
@@ -166,14 +169,23 @@ async function addGame(ctx: Ctx, args: { name: string }) {
   return gameOut(game, []);
 }
 
-async function addCopy(ctx: Ctx, args: { gameId: string; platformId: string; format: string; edition?: string | null }) {
+async function addCopy(
+  ctx: Ctx,
+  args: { gameId: string; platformId: string; format: string; accountId?: string | null; edition?: string | null },
+) {
   const format = validateFormat(args.format);
+  const accountId = validateCopyAccount(format, args.accountId);
   const edition = validateEdition(args.edition);
   const { game, copies } = await loadGame(ctx, args.gameId);
   const platform = await getPlatform(ctx, args.platformId);
+  const account = accountId === undefined ? undefined : await getAccount(ctx, accountId);
 
-  const copy: Copy = { id: randomUUID(), platformId: platform.id, format, edition, createdAt: Date.now() };
+  const copy: Copy = { id: randomUUID(), platformId: platform.id, format, accountId: account?.id, edition, createdAt: Date.now() };
   const next: GameRec = { ...game, ...afterCopyAdded(game), updatedAt: nextUpdatedAt(game) };
+  // The Platform (and Account) must still exist when the Copy lands: a delete may be racing us.
+  const mustExist = (SK: string) => ({
+    ConditionCheck: { TableName: TABLE, Key: { PK: ownerPk(ctx), SK }, ConditionExpression: "attribute_exists(PK)" },
+  });
   try {
     await ddb.send(
       new TransactWriteCommand({
@@ -186,20 +198,15 @@ async function addCopy(ctx: Ctx, args: { gameId: string; platformId: string; for
               ConditionExpression: "attribute_not_exists(PK)",
             },
           },
-          // The Platform must still exist when the Copy lands (deletePlatform may be racing us).
-          {
-            ConditionCheck: {
-              TableName: TABLE,
-              Key: { PK: ownerPk(ctx), SK: platformSk(platform.id) },
-              ConditionExpression: "attribute_exists(PK)",
-            },
-          },
+          mustExist(platformSk(platform.id)),
+          ...(account ? [mustExist(accountSk(account.id))] : []),
         ],
       }),
     );
   } catch (e) {
     const codes = cancellationCodes(e);
     if (codes?.[2] === "ConditionalCheckFailed") throw new UserError("NotFound", "No such Platform");
+    if (codes?.[3] === "ConditionalCheckFailed") throw new UserError("NotFound", "No such Account");
     if (codes) throw changedMeanwhile();
     throw e;
   }
@@ -352,9 +359,81 @@ async function deletePlatform(ctx: Ctx, args: { id: string }) {
   return platform.id;
 }
 
+// ---- Accounts ----------------------------------------------------------------
+//
+// `SK = ACCOUNT#<id>`. Copies point at an Account by id, so renaming it never touches a Copy.
+// The Store is fixed at creation (Imports and a Steam ID depend on it); only the nickname renames.
+// Store-specific fields (ticket 07's Steam ID) go on this same record; accountOut picks the
+// public fields, so a later private field doesn't leak by accident.
+
+const accountSk = (id: string) => `ACCOUNT#${id}`;
+
+function accountOut(rec: Rec): Account {
+  return { id: rec.id as string, store: rec.store as Store, nickname: rec.nickname as string };
+}
+
+async function allAccounts(ctx: Ctx) {
+  return (await queryPrefix(ctx, "ACCOUNT#")).map(accountOut).sort(byAccountLabel);
+}
+
+async function accounts(ctx: Ctx) {
+  return allAccounts(ctx);
+}
+
+async function getAccount(ctx: Ctx, id: unknown): Promise<Account> {
+  if (typeof id !== "string") throw new UserError("NotFound", "No such Account");
+  const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: accountSk(id) } }));
+  if (!r.Item) throw new UserError("NotFound", "No such Account");
+  return accountOut(r.Item);
+}
+
+async function addAccount(ctx: Ctx, args: { store: string; nickname: string }) {
+  const store = validateStore(args.store);
+  const nickname = validateAccountNickname(args.nickname, store, await allAccounts(ctx));
+  const account: Account = { id: randomUUID(), store, nickname };
+  await ddb.send(
+    new PutCommand({
+      TableName: TABLE,
+      Item: { PK: ownerPk(ctx), SK: accountSk(account.id), ...account },
+      ConditionExpression: "attribute_not_exists(PK)",
+    }),
+  );
+  return account;
+}
+
+async function renameAccount(ctx: Ctx, args: { id: string; nickname: string }) {
+  const account = await getAccount(ctx, args.id);
+  const nickname = validateAccountNickname(args.nickname, account.store, await allAccounts(ctx), account.id);
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { PK: ownerPk(ctx), SK: accountSk(account.id) },
+      UpdateExpression: "SET nickname = :n",
+      ConditionExpression: "attribute_exists(PK)",
+      ExpressionAttributeValues: { ":n": nickname },
+    }),
+  );
+  return { ...account, nickname };
+}
+
+async function deleteAccount(ctx: Ctx, args: { id: string }) {
+  const account = await getAccount(ctx, args.id);
+  // Same scan as deletePlatform; addCopy conditions on the Account still existing.
+  const inUse = (await queryPrefix(ctx, "GAME#")).filter((r) => isCopyRec(r) && r.accountId === account.id).length;
+  if (inUse > 0) {
+    throw new UserError(
+      "Conflict",
+      `Account "${accountLabel(account)}" is used by ${inUse} ${inUse === 1 ? "Copy" : "Copies"}; move or remove them first`,
+    );
+  }
+  await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: accountSk(account.id) } }));
+  return account.id;
+}
+
 const RESOLVERS: Record<string, (ctx: Ctx, args: any) => Promise<unknown>> = {
   games, addGame, addCopy, removeCopy, setPlayStatus, setWishlist,
   platforms, addPlatform, renamePlatform, deletePlatform,
+  accounts, addAccount, renameAccount, deleteAccount,
 };
 
 export async function handler(event: AppSyncResolverEvent<Record<string, unknown>>) {
