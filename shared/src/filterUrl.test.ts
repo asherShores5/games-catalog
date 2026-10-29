@@ -15,6 +15,14 @@ describe("filter in the URL", () => {
     expect(filterToUrl({ query: "" })).toBe("");
   });
 
+  it("keeps selected Tags as repeated tag params, after the others", () => {
+    const filter = { query: "x", playStatus: "Playing" as const, tagIds: ["co-op", "open,world"] };
+    expect(filterToUrl(filter)).toBe("q=x&status=Playing&tag=co-op&tag=open%2Cworld");
+    expect(filterFromUrl(filterToUrl(filter))).toEqual(filter);
+    expect(filterToUrl({ tagIds: [] })).toBe("");
+    expect(filterFromUrl("?tag=&tag=a&tag=a")).toEqual({ tagIds: ["a"] });
+  });
+
   it("reads an empty URL as the full list", () => {
     expect(filterFromUrl("")).toEqual({});
     expect(filterFromUrl("?")).toEqual({});

@@ -1,9 +1,10 @@
-import type { Account, Format, Game, Platform, PlayStatus, Store } from "@games/shared";
+import type { Account, Format, Game, Platform, PlayStatus, Store, Tag } from "@games/shared";
 import { freshTokens } from "./auth";
 import { getConfig } from "./config";
 
 const COPY = `id platformId format accountId edition createdAt`;
-const GAME = `id name copies { ${COPY} } owned wishlist playStatus createdAt updatedAt`;
+const GAME = `id name copies { ${COPY} } owned wishlist playStatus tags { tagId source } createdAt updatedAt`;
+const TAG = `id name`;
 const PLATFORM = `id name`;
 const ACCOUNT = `id store nickname`;
 
@@ -25,6 +26,13 @@ export const Q = {
   addAccount: `mutation($store: Store!, $nickname: String!) { addAccount(store: $store, nickname: $nickname) { ${ACCOUNT} } }`,
   renameAccount: `mutation($id: ID!, $nickname: String!) { renameAccount(id: $id, nickname: $nickname) { ${ACCOUNT} } }`,
   deleteAccount: `mutation($id: ID!) { deleteAccount(id: $id) }`,
+  tags: `query { tags { ${TAG} } }`,
+  addTag: `mutation($name: String!) { addTag(name: $name) { ${TAG} } }`,
+  renameTag: `mutation($id: ID!, $name: String!) { renameTag(id: $id, name: $name) { ${TAG} } }`,
+  deleteTag: `mutation($id: ID!) { deleteTag(id: $id) }`,
+  mergeTags: `mutation($fromId: ID!, $intoId: ID!) { mergeTags(fromId: $fromId, intoId: $intoId) { ${TAG} } }`,
+  addGameTag: `mutation($gameId: ID!, $tagId: ID!) { addGameTag(gameId: $gameId, tagId: $tagId) { ${GAME} } }`,
+  removeGameTag: `mutation($gameId: ID!, $tagId: ID!) { removeGameTag(gameId: $gameId, tagId: $tagId) { ${GAME} } }`,
 };
 
 export async function gql<T = any>(query: string, variables: object = {}): Promise<T> {
@@ -78,3 +86,15 @@ export const addAccount = async (store: Store, nickname: string) =>
 export const renameAccount = async (id: string, nickname: string) =>
   (await gql<{ renameAccount: Account }>(Q.renameAccount, { id, nickname })).renameAccount;
 export const deleteAccount = async (id: string) => (await gql<{ deleteAccount: string }>(Q.deleteAccount, { id })).deleteAccount;
+
+// Tags (ticket 06). Deleting or merging a Tag rewrites Games, so callers reload the Game list after.
+export const listTags = async () => (await gql<{ tags: Tag[] }>(Q.tags)).tags;
+export const addTag = async (name: string) => (await gql<{ addTag: Tag }>(Q.addTag, { name })).addTag;
+export const renameTag = async (id: string, name: string) => (await gql<{ renameTag: Tag }>(Q.renameTag, { id, name })).renameTag;
+export const deleteTag = async (id: string) => (await gql<{ deleteTag: string }>(Q.deleteTag, { id })).deleteTag;
+export const mergeTags = async (fromId: string, intoId: string) =>
+  (await gql<{ mergeTags: Tag }>(Q.mergeTags, { fromId, intoId })).mergeTags;
+export const addGameTag = async (gameId: string, tagId: string) =>
+  fixGame((await gql<{ addGameTag: Game }>(Q.addGameTag, { gameId, tagId })).addGameTag);
+export const removeGameTag = async (gameId: string, tagId: string) =>
+  fixGame((await gql<{ removeGameTag: Game }>(Q.removeGameTag, { gameId, tagId })).removeGameTag);

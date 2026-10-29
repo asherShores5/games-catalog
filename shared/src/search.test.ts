@@ -118,3 +118,36 @@ describe("combined filters", () => {
     expect(names({})).toEqual(["Hades", "Hades II", "Hollow Knight", "Celeste"]);
   });
 });
+
+describe("Tag filter", () => {
+  const pc = { id: "c1", platformId: "pc", format: "Physical" as const, createdAt: 1 };
+  const tagged = (name: string, tagIds: string[], copies = [pc]) => ({
+    name, copies, wishlist: false, playStatus: null,
+    tags: tagIds.map((tagId) => ({ tagId, source: tagId === "versus" ? ("Import" as const) : ("Manual" as const) })),
+  });
+  const games = [
+    tagged("It Takes Two", ["coop", "narrative"]),
+    tagged("Valheim", ["coop", "open-world"]),
+    tagged("Elden Ring", ["open-world", "versus"]),
+    tagged("Grounded", ["coop", "open-world"], []),
+    { name: "Celeste", copies: [pc], wishlist: false, playStatus: null },
+  ];
+  const names = (filter: Parameters<typeof gameMatches>[1]) => games.filter((g) => gameMatches(g, filter)).map((g) => g.name);
+
+  it("keeps Games with every selected Tag (AND), whatever the Tag source", () => {
+    expect(names({ tagIds: ["coop"] })).toEqual(["It Takes Two", "Valheim", "Grounded"]);
+    expect(names({ tagIds: ["coop", "open-world"] })).toEqual(["Valheim", "Grounded"]);
+    expect(names({ tagIds: ["versus"] })).toEqual(["Elden Ring"]);
+    expect(names({ tagIds: ["coop", "versus"] })).toEqual([]);
+  });
+
+  it("no selected Tags keeps every Game, including Games with no Tags", () => {
+    expect(names({ tagIds: [] })).toHaveLength(5);
+  });
+
+  it("combines with search and the other filters", () => {
+    expect(names({ tagIds: ["coop", "open-world"], platformId: "pc" })).toEqual(["Valheim"]);
+    expect(names({ tagIds: ["open-world"], query: "ring" })).toEqual(["Elden Ring"]);
+    expect(names({ tagIds: ["coop"], ownership: "owned" })).toEqual(["It Takes Two", "Valheim"]);
+  });
+});
