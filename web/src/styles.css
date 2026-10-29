@@ -25,3 +25,5 @@ button.row { background: none; border: none; color: inherit; text-align: left; c
 .detail .add { flex-wrap: wrap; align-items: center; }
 .copies { list-style: none; padding: 0; margin: 0; }
 .copies li { display: flex; justify-content: space-between; padding: 0.25rem 0; }
+input.search { width: 100%; box-sizing: border-box; margin-top: 0.75rem; }
+.copy-summary { display: flex; flex-direction: column; font-size: 0.85rem; opacity: 0.75; margin-top: 0.15rem; }
