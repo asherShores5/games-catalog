@@ -96,3 +96,49 @@ describe("Secrets Manager key", () => {
     expect(await secretsManagerKey("x", sm({ SecretString: "  " }) as never)()).toBeUndefined();
   });
 });
+
+describe("Steam store client (appdetails)", () => {
+  const page = (data: unknown) => ({ body: { "620": { success: true, data } } });
+  // No real waiting in tests: the client spaces calls through these.
+  const noWait = () => {
+    const waits: number[] = [];
+    let now = 1_000_000;
+    return { waits, now: () => now, sleep: async (ms: number) => { waits.push(ms); now += ms; } };
+  };
+  const store = (f: ReturnType<typeof fakeFetch>, clock = noWait()) =>
+    steamWebApi({ getKey: async () => undefined, fetch: f.fetch, now: clock.now, sleep: clock.sleep });
+
+  it("asks the store for one app's Categories and Genres in English, without the key, and returns their names", async () => {
+    const f = fakeFetch(page({
+      categories: [{ id: 2, description: "Single-player" }, { id: 9, description: "Co-op" }, { id: 1 }],
+      genres: [{ id: "1", description: "Action" }],
+    }));
+    expect(await store(f).appDetails(620)).toEqual({ categories: ["Single-player", "Co-op"], genres: ["Action"] });
+    const url = new URL(f.urls[0]);
+    expect(url.origin + url.pathname).toBe("https://store.steampowered.com/api/appdetails");
+    expect(Object.fromEntries(url.searchParams)).toMatchObject({ appids: "620", l: "english" });
+    expect(url.searchParams.has("key")).toBe(false);
+  });
+
+  it("a page with no Categories or Genres gives empty lists; no page at all is null", async () => {
+    expect(await store(fakeFetch(page({}))).appDetails(620)).toEqual({ categories: [], genres: [] });
+    expect(await store(fakeFetch({ body: { "620": { success: false } } })).appDetails(620)).toBeNull();
+  });
+
+  it("429 is rateLimited; other failures are unavailable", async () => {
+    expect((await steamError(store(fakeFetch({ status: 429 })).appDetails(620))).kind).toBe("rateLimited");
+    expect((await steamError(store(fakeFetch({ status: 403 })).appDetails(620))).kind).toBe("rateLimited");
+    expect((await steamError(store(fakeFetch({ status: 500 })).appDetails(620))).kind).toBe("unavailable");
+    expect((await steamError(store(fakeFetch(new Error("boom"))).appDetails(620))).kind).toBe("unavailable");
+    expect((await steamError(store(fakeFetch({ body: "nope" })).appDetails(620))).kind).toBe("unavailable");
+  });
+
+  it("spaces store calls at least 300ms apart (bursts stay well under the ~200 per 5 minutes limit)", async () => {
+    const clock = noWait();
+    const s = store(fakeFetch(page({})), clock);
+    await s.appDetails(620);
+    await s.appDetails(620);
+    await s.appDetails(620);
+    expect(clock.waits).toEqual([300, 300]);
+  });
+});

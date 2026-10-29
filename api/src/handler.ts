@@ -8,7 +8,7 @@ import {
   type SteamImportSummary, type Store,
 } from "@games/shared";
 import {
-  SEED_TAGS, addManualTag, dropTag, mentionsTag, moveTag, removeGameTag as unlinkTag,
+  SEED_TAGS, addManualTag, dropTag, importTags, mentionsTag, moveTag, removeGameTag as unlinkTag, sameTagName, storeTagNames,
   type GameTag, type GameTags, type Tag,
 } from "@games/shared";
 import {
@@ -101,6 +101,8 @@ interface GameRec extends Partial<GameTags> {
   playStatus: PlayStatus | null;
   /** Set when a Steam Import created or matched this Game. */
   steamAppId?: number;
+  /** Private: when an Import last read this Game's store Categories/Genres (ticket 08). */
+  storeTagsAt?: number;
   createdAt: number;
   updatedAt: number;
 }
@@ -112,6 +114,7 @@ function gameRec(rec: Rec): GameRec {
     wishlist: rec.wishlist === true,
     playStatus: (rec.playStatus as PlayStatus | undefined) ?? null,
     steamAppId: rec.steamAppId as number | undefined,
+    storeTagsAt: rec.storeTagsAt as number | undefined,
     createdAt: rec.createdAt as number,
     updatedAt: rec.updatedAt as number,
     tags: (rec.tags as GameTag[] | undefined) ?? [],
@@ -150,7 +153,7 @@ const oldestFirst = (a: Copy, b: Copy) => a.createdAt - b.createdAt || (a.id < b
 
 function gameOut(game: GameRec, copies: Copy[]): Game {
   const sorted = [...copies].sort(oldestFirst);
-  const { removedTagIds: _private, ...pub } = game;
+  const { removedTagIds: _private, storeTagsAt: _alsoPrivate, ...pub } = game;
   return { ...pub, tags: game.tags ?? [], copies: sorted, owned: isOwned(sorted) };
 }
 
@@ -578,13 +581,19 @@ async function applyStep(
   ctx: Ctx,
   step: ImportStep,
   env: { games: Map<string, { game: GameRec; copies: Copy[] }>; platform: Platform; accountId: string },
+  /** Tag ids from the app's store page, when this Import looked it up. */
+  storeTagIds?: string[],
 ): Promise<{ outcome: StepOutcome; gameId: string; name: string }> {
+  // Store Tags ride in the same Game write as the Copy (or the Steam app ID link). importTags
+  // skips Tags already linked (Manual stays Manual) and Tags I removed from this Game.
+  const withStoreTags = (g: GameRec): GameRec =>
+    storeTagIds ? { ...g, ...importTags(tagState(g), storeTagIds), storeTagsAt: Date.now() } : g;
   const newCopy = (): KnownCopy => ({ id: randomUUID(), platformId: env.platform.id, format: "Digital", accountId: env.accountId, createdAt: Date.now() });
   const copyExtra = { steamAppId: step.app.appId };
 
   if (step.kind === "newGame") {
     const now = Date.now();
-    const next: GameRec = { id: randomUUID(), name: step.name, wishlist: false, playStatus: null, steamAppId: step.app.appId, createdAt: now, updatedAt: now };
+    const next = withStoreTags({ id: randomUUID(), name: step.name, wishlist: false, playStatus: null, steamAppId: step.app.appId, createdAt: now, updatedAt: now });
     await writeCopy(ctx, { next, copy: newCopy(), copyExtra });
     return { outcome: "added", gameId: next.id, name: next.name };
   }
@@ -594,8 +603,8 @@ async function applyStep(
   const steamAppId = step.link ? step.app.appId : read.steamAppId;
   if (step.kind === "present") {
     // Nothing to add. A manual Game matched by name still learns its Steam app ID, so later
-    // Imports (and ticket 08's Tags) find it by ID.
-    if (step.link) await saveGame(ctx, read, { ...read, steamAppId, updatedAt: nextUpdatedAt(read) });
+    // Imports find it by ID. Store Tags (if looked up) land in the same write.
+    if (step.link || storeTagIds) await saveGame(ctx, read, withStoreTags({ ...read, steamAppId, updatedAt: nextUpdatedAt(read) }));
     return { outcome: "present", gameId: read.id, name: read.name };
   }
   if (step.kind === "fillUnknown") {
@@ -603,10 +612,10 @@ async function applyStep(
     // Play status don't change since it was already a Copy.
     const unknown = copies.find((c) => c.id === step.copyId)!;
     const copy: KnownCopy = { ...unknown, platformId: env.platform.id, format: "Digital", accountId: env.accountId };
-    await writeCopy(ctx, { read, next: { ...read, steamAppId, updatedAt: nextUpdatedAt(read) }, copy, copyExtra, fill: true });
+    await writeCopy(ctx, { read, next: withStoreTags({ ...read, steamAppId, updatedAt: nextUpdatedAt(read) }), copy, copyExtra, fill: true });
     return { outcome: "added", gameId: read.id, name: read.name };
   }
-  const next: GameRec = { ...read, ...afterCopyAdded(read), steamAppId, updatedAt: nextUpdatedAt(read) };
+  const next = withStoreTags({ ...read, ...afterCopyAdded(read), steamAppId, updatedAt: nextUpdatedAt(read) });
   await writeCopy(ctx, { read, next, copy: newCopy(), copyExtra });
   return { outcome: "added", gameId: read.id, name: read.name };
 }
@@ -621,6 +630,7 @@ async function inPool<T>(items: T[], limit: number, fn: (item: T) => Promise<voi
 }
 
 async function importSteam(ctx: Ctx, args: { accountId: string }): Promise<SteamImportSummary> {
+  const started = Date.now();
   const rec = await getAccountRec(ctx, args.accountId);
   const account = accountOut(rec);
   if (account.store !== "Steam") throw new UserError("ValidationError", "Only a Steam Account can import from Steam");
@@ -642,18 +652,21 @@ async function importSteam(ctx: Ctx, args: { accountId: string }): Promise<Steam
   const steps = planSteamImport(library, games.map((c) => gameOut(c.game, c.copies)), accountId);
   const env = { games: new Map(games.map((c) => [c.game.id, c])), platform, accountId };
 
-  const summary: SteamImportSummary = { added: 0, alreadyPresent: 0, failed: 0, addedNames: [] };
+  const wanted = storeTagCandidates(steps, env.games);
+  const storeTags = await lookUpStoreTags(ctx, wanted, started);
+
+  const summary: SteamImportSummary = { added: 0, alreadyPresent: 0, failed: 0, addedNames: [], tagged: 0, tagsPending: 0 };
   // Each step touches a different Game (planSteamImport claims a Game for at most one app), so
   // steps can run side by side without racing each other's `updatedAt` guard.
   await inPool(steps, IMPORT_CONCURRENCY, async (step) => {
     try {
-      const r = await applyStep(ctx, step, env);
+      const tagIds = storeTags.get(step.app.appId);
+      const r = await applyStep(ctx, step, env, tagIds);
       if (r.outcome === "added") {
         summary.added++;
         summary.addedNames.push(r.name);
       } else summary.alreadyPresent++;
-      // Ticket 08: per-Game enrichment (store Categories/Genres -> Tags) hooks in here, for
-      // added and present Games alike, keyed by step.app.appId and r.gameId.
+      if (tagIds) summary.tagged++;
     } catch (e) {
       // Logged without Steam data: these are DynamoDB or our own errors, never the Steam ID.
       if (!(e instanceof UserError)) console.error(e);
@@ -661,7 +674,81 @@ async function importSteam(ctx: Ctx, args: { accountId: string }): Promise<Steam
     }
   });
   summary.addedNames.sort((a, b) => byName({ name: a }, { name: b }));
+  summary.tagsPending = wanted.length - summary.tagged;
   return summary;
+}
+
+// ---- Steam Import: store Tags (ticket 08) ------------------------------------
+//
+// Each Import-touched Game's store page (Categories + Genres, no key needed) becomes Import Tags
+// via storeTagNames. The store is rate-limited (roughly 200 requests per 5 minutes) and the
+// Lambda has 25s, so lookups run one at a time (the real client spaces them out), at most
+// STORE_TAGS_CAP per Import and none started after STORE_TAGS_BUDGET_MS. Games never looked up
+// go first, then ones looked up longest ago (refresh after STORE_TAGS_REFRESH_MS); the rest wait
+// for the next Import (summary.tagsPending). A failed lookup only leaves its Game pending; a
+// "slow down" from the store ends the lookups for this Import.
+
+const STORE_TAGS_CAP = 40;
+const STORE_TAGS_BUDGET_MS = 12_000;
+const STORE_TAGS_REFRESH_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** The steps whose Game needs a store Tag lookup, in lookup order. */
+function storeTagCandidates(steps: ImportStep[], games: Map<string, { game: GameRec }>): ImportStep[] {
+  const lastLookup = (step: ImportStep) => (step.kind === "newGame" ? undefined : games.get(step.gameId)?.game.storeTagsAt);
+  const now = Date.now();
+  return steps
+    .filter((step) => {
+      const at = lastLookup(step);
+      return at === undefined || now - at >= STORE_TAGS_REFRESH_MS;
+    })
+    .sort((a, b) => (lastLookup(a) ?? 0) - (lastLookup(b) ?? 0));
+}
+
+/**
+ * Look up store pages for `steps` (within the cap and time budget) and turn them into Tag ids,
+ * creating Tags for names I don't have yet. Keyed by Steam app ID; an app missing from the
+ * result wasn't looked up (or the lookup failed); an app with [] has no usable Tags.
+ */
+async function lookUpStoreTags(ctx: Ctx, steps: ImportStep[], started: number): Promise<Map<number, string[]>> {
+  const names = new Map<number, string[]>();
+  for (const step of steps.slice(0, STORE_TAGS_CAP)) {
+    if (Date.now() - started >= STORE_TAGS_BUDGET_MS) break;
+    try {
+      const details = await steam().appDetails(step.app.appId);
+      names.set(step.app.appId, details ? storeTagNames(details.categories, details.genres) : []);
+    } catch (e) {
+      if (e instanceof SteamError && e.kind === "rateLimited") break;
+      if (!(e instanceof SteamError)) console.error(e);
+    }
+  }
+  if (names.size === 0) return new Map();
+
+  const known = await allTags(ctx);
+  const idFor = new Map<string, string | undefined>();
+  const tagIdFor = async (name: string) => {
+    const tag = known.find((t) => sameTagName(t.name, name));
+    if (tag) return tag.id;
+    try {
+      const created = await addTag(ctx, { name });
+      known.push(created);
+      return created.id;
+    } catch (e) {
+      // A Tag name the rules refuse: skip that Tag, keep the rest.
+      if (!(e instanceof UserError)) throw e;
+      return undefined;
+    }
+  };
+  const out = new Map<number, string[]>();
+  for (const [appId, list] of names) {
+    const ids: string[] = [];
+    for (const name of list) {
+      if (!idFor.has(name)) idFor.set(name, await tagIdFor(name));
+      const id = idFor.get(name);
+      if (id && !ids.includes(id)) ids.push(id);
+    }
+    out.set(appId, ids);
+  }
+  return out;
 }
 
 // ---- Tags --------------------------------------------------------------------

@@ -9,3 +9,4 @@ export * from "./copy";
 export * from "./ownership";
 export * from "./account";
 export * from "./steam";
+export * from "./steamTags";

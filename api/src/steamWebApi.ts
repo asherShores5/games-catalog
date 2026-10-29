@@ -15,13 +15,63 @@ export interface SteamWebApiDeps {
   getKey: () => Promise<string | undefined>;
   /** Test seam; defaults to global fetch. */
   fetch?: Fetch;
+  /** Test seams for spacing store calls; default to the real clock. */
+  now?: () => number;
+  sleep?: (ms: number) => Promise<void>;
 }
 
 const noKey = () => new SteamError("noKey", "The Steam Web API key isn't set up yet (see docs/first-deploy.md)");
 
+// The store's appdetails endpoint: unauthenticated, rate-limited per IP (about 200 requests per
+// 5 minutes). Calls from one client are spaced STORE_GAP_MS apart; the Import caps how many it
+// makes (handler.ts), so a burst stays well under the limit.
+const APP_DETAILS_URL = "https://store.steampowered.com/api/appdetails";
+const STORE_GAP_MS = 300;
+const STORE_TIMEOUT_MS = 4000;
+
+const unavailableStore = () => new SteamError("unavailable", "Couldn't read the Steam store page; try again later");
+
+/** `[{ description: "Single-player" }, …]` -> names, skipping anything malformed. */
+function descriptions(list: unknown): string[] {
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((x) => {
+    const d = (x ?? {}) as { description?: unknown };
+    return typeof d.description === "string" ? [d.description] : [];
+  });
+}
+
 export function steamWebApi(deps: SteamWebApiDeps): SteamLibrary {
   const doFetch: Fetch = deps.fetch ?? ((url, init) => fetch(url, init));
+  const now = deps.now ?? Date.now;
+  const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  let lastStoreCall: number | undefined;
   return {
+    async appDetails(appId) {
+      if (lastStoreCall !== undefined) {
+        const wait = lastStoreCall + STORE_GAP_MS - now();
+        if (wait > 0) await sleep(wait);
+      }
+      lastStoreCall = now();
+      const url = new URL(APP_DETAILS_URL);
+      url.search = new URLSearchParams({ appids: String(appId), l: "english", cc: "us", filters: "categories,genres" }).toString();
+
+      let res;
+      try {
+        res = await doFetch(url.toString(), { signal: AbortSignal.timeout(STORE_TIMEOUT_MS) });
+      } catch {
+        throw unavailableStore();
+      }
+      // The store answers 429 (sometimes 403) when it wants us to slow down.
+      if (res.status === 429 || res.status === 403) throw new SteamError("rateLimited", "The Steam store asked us to slow down; run the Import again later");
+      if (!res.ok) throw unavailableStore();
+      const body = (await res.json().catch(() => undefined)) as Record<string, { success?: unknown; data?: unknown }> | undefined;
+      const entry = body && typeof body === "object" ? body[String(appId)] : undefined;
+      if (!entry || typeof entry !== "object") throw unavailableStore();
+      if (entry.success !== true) return null;
+      const data = (entry.data ?? {}) as { categories?: unknown; genres?: unknown };
+      return { categories: descriptions(data.categories), genres: descriptions(data.genres) };
+    },
+
     async ownedGames(steamId) {
       const key = await deps.getKey();
       if (!key) throw noKey();

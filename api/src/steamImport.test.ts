@@ -63,7 +63,7 @@ describe("Import from Steam", () => {
 
     const summary = await h.call(h.owner, "importSteam", { accountId: steam.id });
 
-    expect(summary).toEqual({ added: 2, alreadyPresent: 0, failed: 0, addedNames: ["Hades", "Portal 2"] });
+    expect(summary).toEqual({ added: 2, alreadyPresent: 0, failed: 0, addedNames: ["Hades", "Portal 2"], tagged: 2, tagsPending: 0 });
     const pc = await platformId("PC");
     const games = await allGames();
     expect(games.map((g: { name: string }) => g.name)).toEqual(["Hades", "Portal 2"]);
@@ -81,11 +81,11 @@ describe("Import from Steam", () => {
     await h.call(h.owner, "importSteam", { accountId: steam.id });
     const before = await allGames();
 
-    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toEqual({ added: 0, alreadyPresent: 2, failed: 0, addedNames: [] });
+    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toEqual({ added: 0, alreadyPresent: 2, failed: 0, addedNames: [], tagged: 0, tagsPending: 0 });
     expect(await allGames()).toEqual(before);
 
     h.steam.set(STEAM_ID, [{ appId: 1145360, name: "Hades" }, { appId: 620, name: "Portal 2" }, { appId: 413150, name: "Stardew Valley" }]);
-    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toEqual({ added: 1, alreadyPresent: 2, failed: 0, addedNames: ["Stardew Valley"] });
+    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toEqual({ added: 1, alreadyPresent: 2, failed: 0, addedNames: ["Stardew Valley"], tagged: 1, tagsPending: 0 });
     const after = await allGames();
     expect(after.filter((g: { name: string }) => g.name !== "Stardew Valley")).toEqual(before);
   });
@@ -114,7 +114,7 @@ describe("Import from Steam", () => {
     const [seeded] = await allGames();
     h.steam.set(STEAM_ID, [{ appId: 1145360, name: "Hades" }]);
 
-    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toEqual({ added: 1, alreadyPresent: 0, failed: 0, addedNames: ["Hades"] });
+    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toEqual({ added: 1, alreadyPresent: 0, failed: 0, addedNames: ["Hades"], tagged: 1, tagsPending: 0 });
     const games = await allGames();
     expect(games).toHaveLength(1);
     expect(games[0]).toMatchObject({ id: seeded.id, playStatus: "Playing", owned: true, steamAppId: 1145360 });
@@ -174,7 +174,7 @@ describe("Import from Steam", () => {
     const manual = await h.call(h.owner, "addCopy", { gameId: g.id, platformId: await platformId("PC"), format: "Digital", accountId: steam.id });
     h.steam.set(STEAM_ID, [{ appId: 1145360, name: "Hades" }]);
 
-    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toEqual({ added: 0, alreadyPresent: 1, failed: 0, addedNames: [] });
+    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toEqual({ added: 0, alreadyPresent: 1, failed: 0, addedNames: [], tagged: 1, tagsPending: 0 });
     const [game] = await allGames();
     expect(game.copies).toEqual(manual.copies);
     expect(game.steamAppId).toBe(1145360);
@@ -196,7 +196,7 @@ describe("Import from Steam", () => {
     const steam = await steamAccount();
     h.steam.set(STEAM_ID, [{ appId: 620, name: "Portal 2" }, { appId: 620, name: "Portal 2" }, { appId: 999, name: "" }]);
     expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toEqual({
-      added: 2, alreadyPresent: 0, failed: 0, addedNames: ["Portal 2", "Steam app 999"],
+      added: 2, alreadyPresent: 0, failed: 0, addedNames: ["Portal 2", "Steam app 999"], tagged: 2, tagsPending: 0,
     });
   });
 

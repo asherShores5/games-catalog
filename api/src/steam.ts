@@ -11,10 +11,21 @@ export interface SteamOwnedGame {
 export interface SteamLibrary {
   /** Every game the Steam ID owns. Throws SteamError when Steam can't or won't say. */
   ownedGames(steamId: string): Promise<SteamOwnedGame[]>;
-  // Ticket 08 adds per-app store details (Categories/Genres) here, e.g. `appDetails(appId)`.
+  /**
+   * One app's store page Categories and Genres (English names), or null when the store has no
+   * page for it (delisted, region-locked). Needs no key. Throws SteamError "rateLimited" when
+   * the store says slow down, "unavailable" for any other failure.
+   */
+  appDetails(appId: number): Promise<SteamAppDetails | null>;
 }
 
-export type SteamErrorKind = "noKey" | "keyRejected" | "private" | "badSteamId" | "unavailable";
+/** The parts of a store page an Import turns into Tags. */
+export interface SteamAppDetails {
+  categories: string[];
+  genres: string[];
+}
+
+export type SteamErrorKind = "noKey" | "keyRejected" | "private" | "badSteamId" | "unavailable" | "rateLimited";
 
 /**
  * A Steam failure the owner can act on. Messages are fixed strings: they never carry the API
