@@ -22,11 +22,31 @@ type Platform {
   name: String!
 }
 
-"One way a Game is owned. platformId points into the Platform list, so a rename follows."
+"Where Digital Copies are bought. A fixed set."
+enum Store {
+  Steam
+  Epic
+  GOG
+  PSN
+  Xbox
+  Nintendo
+  Other
+}
+
+"One login on a Store with a nickname, e.g. Steam: main. The Store is fixed once created."
+type Account {
+  id: ID!
+  store: Store!
+  nickname: String!
+}
+
+"One way a Game is owned. platformId and accountId point into their lists, so a rename follows."
 type Copy {
   id: ID!
   platformId: ID!
   format: Format!
+  "The Account of a Digital Copy. Null on Physical Copies (and on Digital Copies saved before Accounts)."
+  accountId: ID
   edition: String
   createdAt: Float!
 }
@@ -50,13 +70,15 @@ type Query {
   games: [Game!]!
   "The owner's Platforms in name order, seeded with common ones on first use."
   platforms: [Platform!]!
+  "The owner's Accounts, ordered by Store: nickname."
+  accounts: [Account!]!
 }
 
 type Mutation {
   "Add a Game by name (trimmed, 1-200 characters)."
   addGame(name: String!): Game!
-  "Add a Copy. On a Wishlist Game this clears Wishlist and sets Play status to Backlog."
-  addCopy(gameId: ID!, platformId: ID!, format: Format!, edition: String): Game!
+  "Add a Copy. Digital needs accountId, Physical must not have one. On a Wishlist Game this clears Wishlist and sets Play status to Backlog."
+  addCopy(gameId: ID!, platformId: ID!, format: Format!, accountId: ID, edition: String): Game!
   "Remove a Copy. Removing the last one makes the Game not Owned."
   removeCopy(gameId: ID!, copyId: ID!): Game!
   "Set Play status, or null for none."
@@ -69,4 +91,11 @@ type Mutation {
   renamePlatform(id: ID!, name: String!): Platform!
   "Delete a Platform no Copy uses. Returns its id."
   deletePlatform(id: ID!): ID!
+
+  "Add an Account (nickname trimmed, 1-50 characters, unique per Store ignoring case)."
+  addAccount(store: Store!, nickname: String!): Account!
+  "Rename an Account's nickname. Its Copies show the new name; they aren't rewritten."
+  renameAccount(id: ID!, nickname: String!): Account!
+  "Delete an Account no Copy uses. Returns its id."
+  deleteAccount(id: ID!): ID!
 }

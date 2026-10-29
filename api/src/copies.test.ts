@@ -38,9 +38,11 @@ describe("Copies", () => {
       vi.setSystemTime(1_000_000);
       const game = await h.call(h.owner, "addGame", { name: "The Witcher 3" });
       const [pc, sw, ps5] = [await platformId("PC"), await platformId("Switch"), await platformId("PS5")];
+      const steam = await h.call(h.owner, "addAccount", { store: "Steam", nickname: "main" });
       for (const [i, platform] of [pc, sw, ps5].entries()) {
         vi.setSystemTime(2_000_000 + i * 1000);
-        await h.call(h.owner, "addCopy", { gameId: game.id, platformId: platform, format: i === 0 ? "Digital" : "Physical" });
+        const how = i === 0 ? { format: "Digital", accountId: steam.id } : { format: "Physical" };
+        await h.call(h.owner, "addCopy", { gameId: game.id, platformId: platform, ...how });
       }
 
       const listed = await onlyGame();
@@ -54,7 +56,7 @@ describe("Copies", () => {
 
   it("removing the last Copy makes the Game not Owned", async () => {
     const game = await h.call(h.owner, "addGame", { name: "Celeste" });
-    const a = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await platformId("PC"), format: "Digital" });
+    const a = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await platformId("PC"), format: "Physical" });
     const b = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await platformId("Switch"), format: "Physical" });
 
     const aId: string = a.copies[0].id;
@@ -77,18 +79,18 @@ describe("Copies", () => {
   it("rejects an Edition over 100 characters", async () => {
     const game = await h.call(h.owner, "addGame", { name: "Hades" });
     await expect(
-      h.call(h.owner, "addCopy", { gameId: game.id, platformId: await platformId("PC"), format: "Digital", edition: "x".repeat(101) }),
+      h.call(h.owner, "addCopy", { gameId: game.id, platformId: await platformId("PC"), format: "Physical", edition: "x".repeat(101) }),
     ).rejects.toThrow("ValidationError");
   });
 
   it("rejects a Platform that doesn't exist", async () => {
     const game = await h.call(h.owner, "addGame", { name: "Hades" });
-    await expect(h.call(h.owner, "addCopy", { gameId: game.id, platformId: "nope", format: "Digital" })).rejects.toThrow("NotFound");
+    await expect(h.call(h.owner, "addCopy", { gameId: game.id, platformId: "nope", format: "Physical" })).rejects.toThrow("NotFound");
     expect((await onlyGame()).copies).toEqual([]);
   });
 
   it("adding to or removing from a Game that doesn't exist is NotFound", async () => {
-    await expect(h.call(h.owner, "addCopy", { gameId: "nope", platformId: await platformId("PC"), format: "Digital" })).rejects.toThrow("NotFound");
+    await expect(h.call(h.owner, "addCopy", { gameId: "nope", platformId: await platformId("PC"), format: "Physical" })).rejects.toThrow("NotFound");
     await expect(h.call(h.owner, "removeCopy", { gameId: "nope", copyId: "nope" })).rejects.toThrow("NotFound");
   });
 
@@ -99,11 +101,11 @@ describe("Copies", () => {
 
   it("I can't add a Copy to another user's Game, or use their Platform", async () => {
     const theirs = await h.call(h.stranger, "addGame", { name: "Tetris" });
-    await expect(h.call(h.owner, "addCopy", { gameId: theirs.id, platformId: await platformId("PC"), format: "Digital" })).rejects.toThrow("NotFound");
+    await expect(h.call(h.owner, "addCopy", { gameId: theirs.id, platformId: await platformId("PC"), format: "Physical" })).rejects.toThrow("NotFound");
 
     const mine = await h.call(h.owner, "addGame", { name: "Hades" });
     const theirPc = await platformId("PC", h.stranger);
-    await expect(h.call(h.owner, "addCopy", { gameId: mine.id, platformId: theirPc, format: "Digital" })).rejects.toThrow("NotFound");
+    await expect(h.call(h.owner, "addCopy", { gameId: mine.id, platformId: theirPc, format: "Physical" })).rejects.toThrow("NotFound");
   });
 });
 
@@ -111,7 +113,7 @@ describe("Platforms in use", () => {
   it("a Platform with a Copy on it can't be deleted, with a clear error; it can once the Copy is gone", async () => {
     const game = await h.call(h.owner, "addGame", { name: "Hades" });
     const pc = await platformId("PC");
-    const added = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: pc, format: "Digital" });
+    const added = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: pc, format: "Physical" });
 
     await expect(h.call(h.owner, "deletePlatform", { id: pc })).rejects.toThrow(/Conflict: .*PC.* 1 Copy/);
     await h.call(h.owner, "removeCopy", { gameId: game.id, copyId: added.copies[0].id });
@@ -121,7 +123,7 @@ describe("Platforms in use", () => {
   it("renaming a Platform shows on its Copies", async () => {
     const game = await h.call(h.owner, "addGame", { name: "Hades" });
     const pc = await platformId("PC");
-    await h.call(h.owner, "addCopy", { gameId: game.id, platformId: pc, format: "Digital" });
+    await h.call(h.owner, "addCopy", { gameId: game.id, platformId: pc, format: "Physical" });
     await h.call(h.owner, "renamePlatform", { id: pc, name: "Windows PC" });
 
     const names = Object.fromEntries((await h.call(h.owner, "platforms")).map((p: { id: string; name: string }) => [p.id, p.name]));

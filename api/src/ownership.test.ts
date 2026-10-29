@@ -21,7 +21,7 @@ describe("Wishlist", () => {
 
   it("can't be set on an Owned Game, and nothing changes", async () => {
     const game = await h.call(h.owner, "addGame", { name: "Hades" });
-    await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await pcId(), format: "Digital" });
+    await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await pcId(), format: "Physical" });
     await expect(h.call(h.owner, "setWishlist", { gameId: game.id, wishlist: true })).rejects.toThrow("ValidationError");
     expect(await onlyGame()).toMatchObject({ wishlist: false, owned: true });
   });
@@ -30,20 +30,20 @@ describe("Wishlist", () => {
     const game = await h.call(h.owner, "addGame", { name: "Silksong" });
     await h.call(h.owner, "setWishlist", { gameId: game.id, wishlist: true });
 
-    const bought = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await pcId(), format: "Digital" });
+    const bought = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await pcId(), format: "Physical" });
     expect(bought).toMatchObject({ owned: true, wishlist: false, playStatus: "Backlog" });
     expect(await onlyGame()).toMatchObject({ owned: true, wishlist: false, playStatus: "Backlog" });
   });
 
   it("adding a Copy to a Game that isn't on the Wishlist leaves its Play status alone", async () => {
     const game = await h.call(h.owner, "addGame", { name: "Hades" });
-    const withCopy = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await pcId(), format: "Digital" });
+    const withCopy = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await pcId(), format: "Physical" });
     expect(withCopy.playStatus).toBeNull();
   });
 
   it("removing the last Copy doesn't put a Game back on the Wishlist", async () => {
     const game = await h.call(h.owner, "addGame", { name: "Hades" });
-    const added = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await pcId(), format: "Digital" });
+    const added = await h.call(h.owner, "addCopy", { gameId: game.id, platformId: await pcId(), format: "Physical" });
     expect(await h.call(h.owner, "removeCopy", { gameId: game.id, copyId: added.copies[0].id })).toMatchObject({
       owned: false, wishlist: false,
     });
