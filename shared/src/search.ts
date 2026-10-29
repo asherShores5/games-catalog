@@ -27,13 +27,15 @@ export interface GameFilter {
   ownership?: Ownership;
   /** Keep Games with exactly this Play status. */
   playStatus?: PlayStatus;
+  /** Keep Games that have every one of these Tags (AND), from any Tag source. Empty means unset. */
+  tagIds?: string[];
 }
 
 export type Ownership = "owned" | "wishlist";
 export const OWNERSHIPS: readonly Ownership[] = ["owned", "wishlist"];
 
-/** The parts of a Game the list filter looks at. */
-export type FilterableGame = Pick<Game, "name" | "copies" | "wishlist" | "playStatus">;
+/** The parts of a Game the list filter looks at. Missing `tags` reads as none. */
+export type FilterableGame = Pick<Game, "name" | "copies" | "wishlist" | "playStatus"> & Partial<Pick<Game, "tags">>;
 
 /** True when the Game belongs in the list under this filter (every set field must match). */
 export function gameMatches(game: FilterableGame, filter: GameFilter): boolean {
@@ -42,5 +44,6 @@ export function gameMatches(game: FilterableGame, filter: GameFilter): boolean {
   if (filter.ownership === "owned" && !isOwned(game.copies)) return false;
   if (filter.ownership === "wishlist" && !(game.wishlist && canWishlist(game.copies))) return false;
   if (filter.playStatus && game.playStatus !== filter.playStatus) return false;
+  if (filter.tagIds?.some((id) => !game.tags?.some((t) => t.tagId === id))) return false;
   return true;
 }

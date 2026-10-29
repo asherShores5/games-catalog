@@ -7,6 +7,10 @@ import { FilterBar, useUrlFilter } from "./FilterBar";
 import { GameDetail } from "./GameDetail";
 import { GameList } from "./GameList";
 import { Platforms } from "./Platforms";
+import type { Tag } from "@games/shared";
+import { listTags } from "../api";
+import { GameTags } from "./GameTags";
+import { Tags } from "./Tags";
 
 /** My Games: add one by name, search and filter the list, open one to manage its Copies. */
 export function Games() {
@@ -20,6 +24,12 @@ export function Games() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [showAccounts, setShowAccounts] = useState(false);
   const [filter, setFilter] = useUrlFilter();
+  const [tags, setTags] = useState<Tag[]>([]);
+  const [showTags, setShowTags] = useState(false);
+
+  useEffect(() => {
+    listTags().then(setTags, (e) => setError(String(e.message ?? e)));
+  }, []);
 
   useEffect(() => {
     listGames().then(setGames, (e) => setError(String(e.message ?? e)));
@@ -49,6 +59,10 @@ export function Games() {
   if (showPlatforms) {
     return <Platforms platforms={platforms} onChange={setPlatforms} onClose={() => setShowPlatforms(false)} />;
   }
+  if (showTags) {
+    const reloadGames = () => void listGames().then(setGames, (e) => setError(String(e.message ?? e)));
+    return <Tags tags={tags} onChange={setTags} onGamesChanged={reloadGames} onClose={() => setShowTags(false)} />;
+  }
   if (showAccounts) {
     const reload = () => {
       listGames().then(setGames, (e) => setError(String(e.message ?? e)));
@@ -64,6 +78,7 @@ export function Games() {
         <span>
           <button className="link" onClick={() => setShowPlatforms(true)}>Platforms</button>
           <button className="link" onClick={() => setShowAccounts(true)}>Accounts</button>
+          <button className="link" onClick={() => setShowTags(true)}>Tags</button>
           <button className="link" onClick={() => void signOut()}>Sign out</button>
         </span>
       </header>
@@ -76,14 +91,20 @@ export function Games() {
         <p>Loading…</p>
       ) : (
         <>
-          <FilterBar filter={filter} onChange={setFilter} platforms={platforms} />
+          <FilterBar filter={filter} onChange={setFilter} platforms={platforms} tags={tags} />
           <GameList
             games={games}
             filter={filter}
             names={copyNames(platforms, accounts)}
+            tagName={(id) => tags.find((t) => t.id === id)?.name}
             openId={openId}
             onToggle={(id) => setOpenId(openId === id ? undefined : id)}
-            renderDetail={(g) => <GameDetail game={g} platforms={platforms} accounts={accounts} onChange={replace} />}
+            renderDetail={(g) => (
+              <>
+                <GameDetail game={g} platforms={platforms} accounts={accounts} onChange={replace} />
+                <GameTags game={g} tags={tags} onChange={replace} onTagsChange={setTags} />
+              </>
+            )}
           />
         </>
       )}

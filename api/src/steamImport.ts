@@ -1,12 +1,14 @@
 // Steam Import planning: pure (no AWS, no Steam). Given the library and the catalog as read,
 // decide per library entry what the Import does. handler.ts's importSteam applies the plan.
-import { cleanGameName, searchKey, type Game } from "@games/shared";
+import { cleanGameName, isUnknownCopy, searchKey, type Game } from "@games/shared";
 import type { SteamOwnedGame } from "./steam";
 
 /** What happens to one library entry. Every step names the Steam app it came from. */
 export type ImportStep =
   /** The target Game already has a Copy on this Account (imported earlier, or added by hand). */
   | { kind: "present"; app: SteamOwnedGame; gameId: string; link: boolean }
+  /** A Game whose only Copy is an Unknown Copy (from the Seed): that Copy becomes the Steam Copy. */
+  | { kind: "fillUnknown"; app: SteamOwnedGame; gameId: string; copyId: string; link: boolean }
   /** An existing Game gets a Digital Copy on this Account. */
   | { kind: "addCopy"; app: SteamOwnedGame; gameId: string; link: boolean }
   /** A new Game with a Digital Copy on this Account. */
@@ -22,7 +24,9 @@ export const importName = (app: SteamOwnedGame) => cleanGameName(app.name) ?? `S
  * 2. else a manual Game (no Steam app ID) with the same normalised name (searchKey), oldest
  *    first, each claimed by at most one app;
  * 3. else a new Game.
- * A matched Game that already has a Copy on this Account is "present"; manual Copies are never
+ * A matched Game that already has a Copy on this Account is "present". A matched Game whose ONLY
+ * Copy is an Unknown Copy has it filled in (the Seed knew it was owned, Steam says where); with
+ * other Copies too, the Unknown Copy is left alone and a Copy is added. Other Copies are never
  * changed. Duplicate app IDs in the library are counted once.
  */
 export function planSteamImport(library: SteamOwnedGame[], games: Game[], accountId: string): ImportStep[] {
@@ -50,8 +54,13 @@ export function planSteamImport(library: SteamOwnedGame[], games: Game[], accoun
       steps.push({ kind: "newGame", app, name: importName(app) });
       continue;
     }
-    const present = game.copies.some((c) => c.accountId === accountId);
-    steps.push({ kind: present ? "present" : "addCopy", app, gameId: game.id, link });
+    if (game.copies.some((c) => c.accountId === accountId)) {
+      steps.push({ kind: "present", app, gameId: game.id, link });
+    } else if (game.copies.length === 1 && isUnknownCopy(game.copies[0])) {
+      steps.push({ kind: "fillUnknown", app, gameId: game.id, copyId: game.copies[0].id, link });
+    } else {
+      steps.push({ kind: "addCopy", app, gameId: game.id, link });
+    }
   }
   return steps;
 }

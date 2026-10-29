@@ -108,19 +108,55 @@ describe("Import from Steam", () => {
     expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toMatchObject({ added: 0, alreadyPresent: 1 });
   });
 
-  it("a Seeded Game keeps its Unknown Copy (I fill or remove it) and gains the Steam Copy beside it", async () => {
+  it("a Seeded Game whose only Copy is Unknown gets that Copy filled in as the Steam Copy, keeping its id", async () => {
     const steam = await steamAccount();
     await h.seed(h.owner, [{ name: "Hades", status: "Playing" }]);
     const [seeded] = await allGames();
     h.steam.set(STEAM_ID, [{ appId: 1145360, name: "Hades" }]);
 
-    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toMatchObject({ added: 1, alreadyPresent: 0 });
+    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toEqual({ added: 1, alreadyPresent: 0, failed: 0, addedNames: ["Hades"] });
     const games = await allGames();
     expect(games).toHaveLength(1);
-    expect(games[0]).toMatchObject({ id: seeded.id, playStatus: "Playing", steamAppId: 1145360 });
-    expect(games[0].copies).toHaveLength(2);
-    expect(games[0].copies).toContainEqual(seeded.copies[0]);
-    expect(games[0].copies).toContainEqual(expect.objectContaining({ format: "Digital", accountId: steam.id }));
+    expect(games[0]).toMatchObject({ id: seeded.id, playStatus: "Playing", owned: true, steamAppId: 1145360 });
+    expect(games[0].copies).toEqual([
+      { ...seeded.copies[0], platformId: await platformId("PC"), format: "Digital", accountId: steam.id },
+    ]);
+    // Now a normal imported Copy: a re-run finds it present.
+    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toMatchObject({ added: 0, alreadyPresent: 1 });
+    expect((await allGames())[0].copies).toHaveLength(1);
+  });
+
+  it("a Seeded Game with other Copies too keeps its Unknown Copy and gains the Steam Copy beside it", async () => {
+    const steam = await steamAccount();
+    await h.seed(h.owner, [{ name: "Hades", status: "Owned" }]);
+    const [seeded] = await allGames();
+    const withSwitch = await h.call(h.owner, "addCopy", { gameId: seeded.id, platformId: await platformId("Switch"), format: "Physical" });
+    h.steam.set(STEAM_ID, [{ appId: 1145360, name: "Hades" }]);
+
+    expect(await h.call(h.owner, "importSteam", { accountId: steam.id })).toMatchObject({ added: 1, alreadyPresent: 0 });
+    const [game] = await allGames();
+    expect(game.copies).toHaveLength(3);
+    for (const c of withSwitch.copies) expect(game.copies).toContainEqual(c);
+    expect(game.copies).toContainEqual(expect.objectContaining({ format: "Digital", accountId: steam.id }));
+  });
+
+  it("an Import that adds a Copy keeps the Game's Tags and Tag removals", async () => {
+    const steam = await steamAccount();
+    const g = await h.call(h.owner, "addGame", { name: "Hades" });
+    const tags: { id: string; name: string }[] = await h.call(h.owner, "tags");
+    const tagId = (name: string) => tags.find((t) => t.name === name)!.id;
+    await h.call(h.owner, "addGameTag", { gameId: g.id, tagId: tagId("single-player") });
+    await h.call(h.owner, "addGameTag", { gameId: g.id, tagId: tagId("co-op") });
+    const tagged = await h.call(h.owner, "removeGameTag", { gameId: g.id, tagId: tagId("co-op") });
+    h.steam.set(STEAM_ID, [{ appId: 1145360, name: "Hades" }]);
+
+    await h.call(h.owner, "importSteam", { accountId: steam.id });
+
+    const [game] = await allGames();
+    expect(game.copies).toHaveLength(1);
+    expect(game.tags).toEqual(tagged.tags);
+    const rec = h.db.dump().find((r) => r.SK === "GAME#" + g.id)!;
+    expect(rec.removedTagIds).toEqual([tagId("co-op")]);
   });
 
   it("a Wishlist Game that turns up in the library leaves the Wishlist as Backlog", async () => {

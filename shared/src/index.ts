@@ -4,6 +4,7 @@ export * from "./search";
 export * from "./filterUrl";
 export * from "./copyLabel";
 export * from "./platform";
+export * from "./tag";
 export * from "./copy";
 export * from "./ownership";
 export * from "./account";

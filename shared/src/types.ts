@@ -1,3 +1,5 @@
+import type { GameTag } from "./tag";
+
 /** Digital or Physical (see GLOSSARY.md). */
 export type Format = "Digital" | "Physical";
 export const FORMATS: readonly Format[] = ["Digital", "Physical"];
@@ -58,6 +60,8 @@ export interface Game {
   playStatus: PlayStatus | null;
   /** The Steam app this Game matches, once a Steam Import created or matched it. Public data. */
   steamAppId?: number;
+  /** Its Tags, each with its Tag source, in the order they were added. */
+  tags: GameTag[];
   createdAt: number;
   updatedAt: number;
 }

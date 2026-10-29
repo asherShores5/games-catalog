@@ -88,7 +88,7 @@ describe("Owned", () => {
   it("Games from before Copies existed read as unowned, not on the Wishlist, no Play status", async () => {
     h.db.seed({ PK: "OWNER#sub-owner", SK: "GAME#old", id: "old", name: "Old", createdAt: 1, updatedAt: 1 });
     expect(await onlyGame()).toEqual({
-      id: "old", name: "Old", copies: [], owned: false, wishlist: false, playStatus: null, createdAt: 1, updatedAt: 1,
+      id: "old", name: "Old", copies: [], owned: false, wishlist: false, playStatus: null, tags: [], createdAt: 1, updatedAt: 1,
     });
   });
 });

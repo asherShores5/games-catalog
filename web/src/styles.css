@@ -28,3 +28,5 @@ button.row { background: none; border: none; color: inherit; text-align: left; c
 input.search { width: 100%; box-sizing: border-box; margin-top: 0.75rem; }
 .filter-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.5rem; }
 .copy-summary { display: flex; flex-direction: column; font-size: 0.85rem; opacity: 0.75; margin-top: 0.15rem; }
+.tag-list { list-style: none; padding: 0; margin: 0 0 0.5rem; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.badge.tag { background: #4a90d933; }

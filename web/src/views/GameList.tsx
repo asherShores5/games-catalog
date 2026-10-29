@@ -5,8 +5,10 @@ import { canWishlist, copyParts, gameMatches, type CopyNames, type Game, type Ga
  * The Game list narrowed by a filter (client-side, re-run on every keystroke). Each row shows
  * every Copy (Platform, Format, Account, Edition); clicking a row opens it via renderDetail.
  */
-export function GameList({ games, filter, names, openId, onToggle, renderDetail }: {
+export function GameList({ games, filter, names, openId, onToggle, renderDetail, tagName }: {
   games: Game[];
+  /** Tag id to name; Tags it doesn't know aren't shown. */
+  tagName?: (id: string) => string | undefined;
   filter: GameFilter;
   names: CopyNames;
   openId: string | undefined;
@@ -36,6 +38,10 @@ export function GameList({ games, filter, names, openId, onToggle, renderDetail 
               {g.owned && <span className="badge">{g.copies.length === 1 ? "1 Copy" : `${g.copies.length} Copies`}</span>}
               {g.wishlist && canWishlist(g.copies) && <span className="badge">Wishlist</span>}
               {g.playStatus && <span className="badge">{g.playStatus}</span>}
+              {tagName && g.tags.map((t) => {
+                const n = tagName(t.tagId);
+                return n && <span key={t.tagId} className="badge tag">{n}</span>;
+              })}
             </span>
           </button>
           {openId === g.id && renderDetail(g)}
