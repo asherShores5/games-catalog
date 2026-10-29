@@ -3,13 +3,14 @@ import { DynamoDBClient } from "@aws-sdk/client-dynamodb";
 import { DeleteCommand, DynamoDBDocumentClient, GetCommand, PutCommand, QueryCommand, TransactWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import type { AppSyncIdentityCognito, AppSyncResolverEvent } from "aws-lambda";
 import {
-  SEED_PLATFORMS, accountLabel, afterCopyAdded, byAccountLabel, byName, canWishlist, isOwned,
+  SEED_PLATFORMS, accountLabel, afterCopyAdded, byAccountLabel, byName, canWishlist, isOwned, isUnknownCopy,
   type Account, type Copy, type Format, type Game, type Platform, type PlayStatus, type Store,
 } from "@games/shared";
 import {
   UserError, validateAccountNickname, validateEdition, validateFormat, validateGameName, validatePlatformName,
   validateCopyAccount, validatePlayStatus, validateStore,
 } from "./rules";
+import { parseSeedRows, seedKey, seedState } from "./seed";
 
 const TABLE = process.env.TABLE_NAME!;
 
@@ -89,12 +90,24 @@ function gameRec(rec: Rec): GameRec {
 function copyOut(rec: Rec): Copy {
   return {
     id: rec.id as string,
-    platformId: rec.platformId as string,
-    format: rec.format as Format,
+    // Both absent on an Unknown Copy (from the Seed) until it is filled in.
+    platformId: rec.platformId as string | undefined,
+    format: rec.format as Format | undefined,
     // Absent on Physical Copies, and on Digital Copies saved before Accounts existed.
     accountId: rec.accountId as string | undefined,
     edition: rec.edition as string | undefined,
     createdAt: rec.createdAt as number,
+  };
+}
+
+/** The Put for a brand-new Copy record of `gameId` (the Seed's Unknown Copies; addCopy inlines the same Put). */
+function putNewCopy(ctx: Ctx, gameId: string, copy: Copy) {
+  return {
+    Put: {
+      TableName: TABLE,
+      Item: { PK: ownerPk(ctx), SK: copyPrefix(gameId) + copy.id, gameId, ...copy },
+      ConditionExpression: "attribute_not_exists(PK)",
+    },
   };
 }
 
@@ -211,6 +224,59 @@ async function addCopy(
     throw e;
   }
   return gameOut(next, [...copies, copy]);
+}
+
+/**
+ * Give an Unknown Copy its Platform and Format (and Account if Digital), keeping its id. The same
+ * rules as addCopy (validateCopyAccount, Platform/Account must exist, at index 2/3 of the
+ * transaction); Owned, Wishlist and Play status don't change since it was already a Copy.
+ */
+async function fillUnknownCopy(
+  ctx: Ctx,
+  args: { gameId: string; copyId: string; platformId: string; format: string; accountId?: string | null; edition?: string | null },
+) {
+  const format = validateFormat(args.format);
+  const accountId = validateCopyAccount(format, args.accountId);
+  const edition = validateEdition(args.edition);
+  const { game, copies } = await loadGame(ctx, args.gameId);
+  const unknown = copies.find((c) => c.id === args.copyId);
+  if (!unknown) throw new UserError("NotFound", "No such Copy on this Game");
+  if (!isUnknownCopy(unknown)) {
+    throw new UserError("ValidationError", "That Copy's location is already known; remove it and add a new Copy instead");
+  }
+  const platform = await getPlatform(ctx, args.platformId);
+  const account = accountId === undefined ? undefined : await getAccount(ctx, accountId);
+
+  const copy: Copy = { ...unknown, platformId: platform.id, format, accountId: account?.id, edition: edition ?? unknown.edition };
+  const next: GameRec = { ...game, updatedAt: nextUpdatedAt(game) };
+  const mustExist = (SK: string) => ({
+    ConditionCheck: { TableName: TABLE, Key: { PK: ownerPk(ctx), SK }, ConditionExpression: "attribute_exists(PK)" },
+  });
+  try {
+    await ddb.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          putGameIfUnchanged(ctx, game, next),
+          {
+            Put: {
+              TableName: TABLE,
+              Item: { PK: ownerPk(ctx), SK: copyPrefix(game.id) + copy.id, gameId: game.id, ...copy },
+              ConditionExpression: "attribute_exists(PK)",
+            },
+          },
+          mustExist(platformSk(platform.id)),
+          ...(account ? [mustExist(accountSk(account.id))] : []),
+        ],
+      }),
+    );
+  } catch (e) {
+    const codes = cancellationCodes(e);
+    if (codes?.[2] === "ConditionalCheckFailed") throw new UserError("NotFound", "No such Platform");
+    if (codes?.[3] === "ConditionalCheckFailed") throw new UserError("NotFound", "No such Account");
+    if (codes) throw changedMeanwhile();
+    throw e;
+  }
+  return gameOut(next, copies.map((c) => (c.id === copy.id ? copy : c)));
 }
 
 async function removeCopy(ctx: Ctx, args: { gameId: string; copyId: string }) {
@@ -430,8 +496,58 @@ async function deleteAccount(ctx: Ctx, args: { id: string }) {
   return account.id;
 }
 
+// ---- Seed --------------------------------------------------------------------
+//
+// Not a resolver: scripts/seed.ts calls this in-process for one explicit owner (ticket 12 runs it
+// against prod). It writes the same records the resolvers do, each Game atomically with its
+// Unknown Copy, and skips any row whose Game is already in the catalog (by seedKey), so a re-run
+// (or a run after a partial failure) adds only what is missing and never touches existing Games.
+
+export interface SeedResult {
+  /** Names written (or, on a dry run, that would be). */
+  added: string[];
+  /** Names skipped because a Game with the same name is already in the catalog. */
+  present: string[];
+}
+
+export async function seedGames(userId: string, raw: unknown, opts: { dryRun?: boolean } = {}): Promise<SeedResult> {
+  if (!userId || userId.includes("#")) throw new UserError("ValidationError", "Seed needs the owner's Cognito sub");
+  const rows = parseSeedRows(raw);
+  const ctx: Ctx = { userId };
+  const existing = new Set((await allGames(ctx)).map((g) => seedKey(g.name)));
+  const result: SeedResult = { added: [], present: [] };
+  for (const row of rows) {
+    if (existing.has(seedKey(row.name))) {
+      result.present.push(row.name);
+      continue;
+    }
+    result.added.push(row.name);
+    if (opts.dryRun) continue;
+
+    const { wishlist, playStatus, unknownCopy } = seedState(row.status);
+    const now = Date.now();
+    const game: GameRec = { id: randomUUID(), name: row.name, wishlist, playStatus, createdAt: now, updatedAt: now };
+    const copy: Copy | undefined = unknownCopy ? { id: randomUUID(), createdAt: now } : undefined;
+    await ddb.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Put: {
+              TableName: TABLE,
+              Item: { PK: ownerPk(ctx), SK: gameSk(game.id), ...game, playStatus: game.playStatus ?? undefined },
+              ConditionExpression: "attribute_not_exists(PK)",
+            },
+          },
+          ...(copy ? [putNewCopy(ctx, game.id, copy)] : []),
+        ],
+      }),
+    );
+  }
+  return result;
+}
+
 const RESOLVERS: Record<string, (ctx: Ctx, args: any) => Promise<unknown>> = {
-  games, addGame, addCopy, removeCopy, setPlayStatus, setWishlist,
+  games, addGame, addCopy, fillUnknownCopy, removeCopy, setPlayStatus, setWishlist,
   platforms, addPlatform, renamePlatform, deletePlatform,
   accounts, addAccount, renameAccount, deleteAccount,
 };

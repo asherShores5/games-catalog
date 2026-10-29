@@ -12,6 +12,8 @@ export const Q = {
   addGame: `mutation($name: String!) { addGame(name: $name) { ${GAME} } }`,
   addCopy: `mutation($gameId: ID!, $platformId: ID!, $format: Format!, $accountId: ID, $edition: String) {
     addCopy(gameId: $gameId, platformId: $platformId, format: $format, accountId: $accountId, edition: $edition) { ${GAME} } }`,
+  fillUnknownCopy: `mutation($gameId: ID!, $copyId: ID!, $platformId: ID!, $format: Format!, $accountId: ID, $edition: String) {
+    fillUnknownCopy(gameId: $gameId, copyId: $copyId, platformId: $platformId, format: $format, accountId: $accountId, edition: $edition) { ${GAME} } }`,
   removeCopy: `mutation($gameId: ID!, $copyId: ID!) { removeCopy(gameId: $gameId, copyId: $copyId) { ${GAME} } }`,
   setPlayStatus: `mutation($gameId: ID!, $playStatus: PlayStatus) { setPlayStatus(gameId: $gameId, playStatus: $playStatus) { ${GAME} } }`,
   setWishlist: `mutation($gameId: ID!, $wishlist: Boolean!) { setWishlist(gameId: $gameId, wishlist: $wishlist) { ${GAME} } }`,
@@ -38,16 +40,25 @@ export async function gql<T = any>(query: string, variables: object = {}): Promi
   return json.data as T;
 }
 
-// GraphQL returns null for a missing Edition or Account; the shared type uses undefined.
+// GraphQL returns null for a missing Edition, Account, or an Unknown Copy's Platform and Format;
+// the shared type uses undefined.
 const fixGame = (g: Game): Game => ({
   ...g,
-  copies: g.copies.map((c) => ({ ...c, edition: c.edition ?? undefined, accountId: c.accountId ?? undefined })),
+  copies: g.copies.map((c) => ({
+    ...c,
+    platformId: c.platformId ?? undefined,
+    format: c.format ?? undefined,
+    accountId: c.accountId ?? undefined,
+    edition: c.edition ?? undefined,
+  })),
 });
 
 export const listGames = async () => (await gql<{ games: Game[] }>(Q.games)).games.map(fixGame);
 export const addGame = async (name: string) => fixGame((await gql<{ addGame: Game }>(Q.addGame, { name })).addGame);
 export const addCopy = async (v: { gameId: string; platformId: string; format: Format; accountId?: string; edition?: string }) =>
   fixGame((await gql<{ addCopy: Game }>(Q.addCopy, v)).addCopy);
+export const fillUnknownCopy = async (v: { gameId: string; copyId: string; platformId: string; format: Format; accountId?: string }) =>
+  fixGame((await gql<{ fillUnknownCopy: Game }>(Q.fillUnknownCopy, v)).fillUnknownCopy);
 export const removeCopy = async (gameId: string, copyId: string) =>
   fixGame((await gql<{ removeCopy: Game }>(Q.removeCopy, { gameId, copyId })).removeCopy);
 export const setPlayStatus = async (gameId: string, playStatus: PlayStatus | null) =>

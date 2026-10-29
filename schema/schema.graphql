@@ -40,11 +40,11 @@ type Account {
   nickname: String!
 }
 
-"One way a Game is owned. platformId and accountId point into their lists, so a rename follows."
+"One way a Game is owned. platformId and accountId point into their lists, so a rename follows. An Unknown Copy (from the Seed) has a null platformId and format until it is filled in."
 type Copy {
   id: ID!
-  platformId: ID!
-  format: Format!
+  platformId: ID
+  format: Format
   "The Account of a Digital Copy. Null on Physical Copies (and on Digital Copies saved before Accounts)."
   accountId: ID
   edition: String
@@ -79,6 +79,8 @@ type Mutation {
   addGame(name: String!): Game!
   "Add a Copy. Digital needs accountId, Physical must not have one. On a Wishlist Game this clears Wishlist and sets Play status to Backlog."
   addCopy(gameId: ID!, platformId: ID!, format: Format!, accountId: ID, edition: String): Game!
+  "Give an Unknown Copy its Platform and Format (same Account rule as addCopy). The Copy keeps its id."
+  fillUnknownCopy(gameId: ID!, copyId: ID!, platformId: ID!, format: Format!, accountId: ID, edition: String): Game!
   "Remove a Copy. Removing the last one makes the Game not Owned."
   removeCopy(gameId: ID!, copyId: ID!): Game!
   "Set Play status, or null for none."
