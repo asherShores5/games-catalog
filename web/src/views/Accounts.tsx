@@ -165,6 +165,8 @@ function ImportSummary({ summary: s }: { summary: SteamImportSummary }) {
     <small className="summary">
       {" "}Added {s.added}, {s.alreadyPresent} already present{s.failed > 0 && `, ${s.failed} failed (run it again to retry)`}.
       {s.addedNames.length > 0 && ` New: ${s.addedNames.join(", ")}.`}
+      {s.tagged > 0 && ` Store Tags read for ${s.tagged}.`}
+      {s.tagsPending > 0 && ` ${s.tagsPending} still waiting for store Tags (run it again to continue).`}
     </small>
   );
 }

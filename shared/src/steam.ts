@@ -22,4 +22,8 @@ export interface SteamImportSummary {
   addedNames: string[];
   /** Library entries that couldn't be saved this time (re-running the Import retries them). */
   failed: number;
+  /** Games whose store Categories/Genres were read and applied as Tags this time. */
+  tagged: number;
+  /** Games still waiting for a store Tag lookup (per-Import limit, or the store was busy); re-run to continue. */
+  tagsPending: number;
 }

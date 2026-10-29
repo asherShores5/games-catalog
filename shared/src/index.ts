@@ -10,3 +10,4 @@ export * from "./ownership";
 export * from "./merge";
 export * from "./account";
 export * from "./steam";
+export * from "./steamTags";

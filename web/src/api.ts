@@ -27,7 +27,7 @@ export const Q = {
   renameAccount: `mutation($id: ID!, $nickname: String!) { renameAccount(id: $id, nickname: $nickname) { ${ACCOUNT} } }`,
   deleteAccount: `mutation($id: ID!) { deleteAccount(id: $id) }`,
   setSteamId: `mutation($accountId: ID!, $steamId: String) { setSteamId(accountId: $accountId, steamId: $steamId) { ${ACCOUNT} } }`,
-  importSteam: `mutation($accountId: ID!) { importSteam(accountId: $accountId) { added alreadyPresent addedNames failed } }`,
+  importSteam: `mutation($accountId: ID!) { importSteam(accountId: $accountId) { added alreadyPresent addedNames failed tagged tagsPending } }`,
   tags: `query { tags { ${TAG} } }`,
   addTag: `mutation($name: String!) { addTag(name: $name) { ${TAG} } }`,
   renameTag: `mutation($id: ID!, $name: String!) { renameTag(id: $id, name: $name) { ${TAG} } }`,

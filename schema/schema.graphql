@@ -99,6 +99,10 @@ type SteamImportSummary {
   addedNames: [String!]!
   "Library entries that couldn't be saved this time; re-running retries them."
   failed: Int!
+  "Games whose Steam store Categories/Genres were read and applied as Tags this time."
+  tagged: Int!
+  "Games still waiting for a store Tag lookup (per-Import limit, or the store was busy); re-running continues."
+  tagsPending: Int!
 }
 
 type Query {
