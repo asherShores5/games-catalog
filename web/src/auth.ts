@@ -1,5 +1,6 @@
 // Cognito user-pool auth via the public JSON API (no SDK), as in Honey Do. Password sign-in only for
-// now; the refresh token keeps the session for 30 days.
+// now. Tokens live in localStorage, so the installed PWA stays signed in across launches; the
+// rotating refresh token keeps it signed in as long as it's opened at least once every 30 days.
 import { getConfig } from "./config";
 
 interface Tokens {
@@ -40,8 +41,14 @@ async function cognito<T = any>(target: string, body: object): Promise<T> {
     body: JSON.stringify(body),
   });
   const json = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(json.message ?? json.__type ?? `Cognito ${target} failed`);
+  if (!r.ok) throw new CognitoError(json.__type, json.message ?? json.__type ?? `Cognito ${target} failed`);
   return json as T;
+}
+
+class CognitoError extends Error {
+  constructor(readonly type: string | undefined, message: string) {
+    super(message);
+  }
 }
 
 function accept(result: any, username: string, refreshToken?: string) {
@@ -84,16 +91,15 @@ export async function freshTokens(): Promise<Tokens> {
   refreshing ??= (async () => {
     const t = tokens!;
     try {
-      const r = await cognito("InitiateAuth", {
-        AuthFlow: "REFRESH_TOKEN_AUTH",
-        ClientId: getConfig().clientId,
-        AuthParameters: { REFRESH_TOKEN: t.refreshToken },
-      });
+      // The client rotates refresh tokens (infra AppStack), which needs this call rather than
+      // InitiateAuth REFRESH_TOKEN_AUTH. Each refresh returns a new refresh token, so the 30-day
+      // window rolls forward while the app is in use.
+      const r = await cognito("GetTokensFromRefreshToken", { ClientId: getConfig().clientId, RefreshToken: t.refreshToken });
       accept(r, t.username, t.refreshToken);
       return tokens!;
     } catch (e) {
-      // Only a rejected refresh token signs you out; network errors keep the session.
-      if (navigator.onLine && /token|auth/i.test(String((e as Error).message))) save(null);
+      // Only a rejected refresh token signs you out; network and server errors keep the session.
+      if (e instanceof CognitoError && e.type === "NotAuthorizedException") save(null);
       throw e;
     } finally {
       refreshing = null;

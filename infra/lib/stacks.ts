@@ -10,12 +10,17 @@ import {
 } from "aws-cdk-lib";
 import type { Construct } from "constructs";
 
-/** Served here once ticket 11 adds hosting (cert, CloudFront, DNS). */
+/** Served by WebStack (lib/hosting.ts). */
 export const APP_DOMAIN = "games.ashershores.com";
 const ROOT = path.join(__dirname, "..", "..");
 
-/** Data, auth and API. Hosting and deploy CI come in ticket 11. */
+/** Data, auth and API. Hosting: CertStack/WebStack (lib/hosting.ts). Deploy CI: CiStack (lib/ci.ts). */
 export class AppStack extends Stack {
+  /** Read by WebStack for the web app's config.json. */
+  readonly userPool: cognito.UserPool;
+  readonly client: cognito.UserPoolClient;
+  readonly api: appsync.GraphqlApi;
+
   constructor(scope: Construct, id: string, props: StackProps) {
     super(scope, id, props);
 
@@ -51,6 +56,9 @@ export class AppStack extends Stack {
       accessTokenValidity: Duration.hours(1),
       idTokenValidity: Duration.hours(1),
       refreshTokenValidity: Duration.days(30),
+      // Each refresh returns a new refresh token (web/src/auth.ts uses GetTokensFromRefreshToken),
+      // so the 30 days roll forward while the app is in use.
+      refreshTokenRotationGracePeriod: Duration.seconds(10),
     });
 
     // ---- API ----
@@ -76,6 +84,10 @@ export class AppStack extends Stack {
       },
       logConfig: { fieldLogLevel: appsync.FieldLogLevel.ERROR, retention: logs.RetentionDays.TWO_WEEKS },
     });
+    this.userPool = userPool;
+    this.client = client;
+    this.api = api;
+
     const ds = api.addLambdaDataSource("ApiDs", fn);
     for (const field of ["games", "platforms"]) ds.createResolver(`Q${field}`, { typeName: "Query", fieldName: field });
     for (const field of ["addGame", "addCopy", "removeCopy", "setPlayStatus", "setWishlist", "addPlatform", "renamePlatform", "deletePlatform"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
