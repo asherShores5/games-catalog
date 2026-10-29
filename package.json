@@ -1,0 +1,10 @@
+{
+  "name": "games-catalog",
+  "private": true,
+  "workspaces": ["shared", "api", "infra", "web"],
+  "scripts": {
+    "test": "npm test -w shared -w api -w web",
+    "typecheck": "npm run typecheck -w shared -w api -w web -w infra",
+    "synth": "npm run synth -w infra"
+  }
+}
