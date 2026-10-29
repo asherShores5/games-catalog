@@ -30,5 +30,12 @@ To run the web app against a deployed stack: copy `web/public/config.example.jso
 
 No AWS account IDs, hosted zone IDs, Steam IDs or keys go in tracked files. The account comes
 from the deploying credentials; the region defaults to us-west-1 (`-c region=...` to override).
+With no hosted zone set, `npm run synth` builds only the app stack; with one, it adds the
+certificate, web hosting (S3 + CloudFront at games.ashershores.com) and CI role stacks.
+
+## Deploy
+
+Pushes to `prod` deploy through GitHub Actions (`.github/workflows/ci.yml`, GitHub OIDC, no
+stored keys). The first deploy and the GitHub settings are by hand: see `docs/first-deploy.md`.
 
 License: MIT.
