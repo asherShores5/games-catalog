@@ -35,6 +35,10 @@ export const Q = {
   mergeTags: `mutation($fromId: ID!, $intoId: ID!) { mergeTags(fromId: $fromId, intoId: $intoId) { ${TAG} } }`,
   addGameTag: `mutation($gameId: ID!, $tagId: ID!) { addGameTag(gameId: $gameId, tagId: $tagId) { ${GAME} } }`,
   removeGameTag: `mutation($gameId: ID!, $tagId: ID!) { removeGameTag(gameId: $gameId, tagId: $tagId) { ${GAME} } }`,
+  // Two forms: leaving playStatus out means "keep the more advanced one"; null means none.
+  mergeGames: `mutation($fromId: ID!, $intoId: ID!) { mergeGames(fromId: $fromId, intoId: $intoId) { ${GAME} } }`,
+  mergeGamesWithStatus: `mutation($fromId: ID!, $intoId: ID!, $playStatus: PlayStatus) {
+    mergeGames(fromId: $fromId, intoId: $intoId, playStatus: $playStatus) { ${GAME} } }`,
 };
 
 export async function gql<T = any>(query: string, variables: object = {}): Promise<T> {
@@ -106,3 +110,12 @@ export const addGameTag = async (gameId: string, tagId: string) =>
   fixGame((await gql<{ addGameTag: Game }>(Q.addGameTag, { gameId, tagId })).addGameTag);
 export const removeGameTag = async (gameId: string, tagId: string) =>
   fixGame((await gql<{ removeGameTag: Game }>(Q.removeGameTag, { gameId, tagId })).removeGameTag);
+
+// Merge Games (ticket 09). `choice` omitted = the more advanced Play status; given = that one (null = none).
+export const mergeGames = async (fromId: string, intoId: string, choice?: { playStatus: PlayStatus | null }) =>
+  fixGame(
+    (choice
+      ? await gql<{ mergeGames: Game }>(Q.mergeGamesWithStatus, { fromId, intoId, playStatus: choice.playStatus })
+      : await gql<{ mergeGames: Game }>(Q.mergeGames, { fromId, intoId })
+    ).mergeGames,
+  );

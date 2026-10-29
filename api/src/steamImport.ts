@@ -3,6 +3,9 @@
 import { cleanGameName, isUnknownCopy, searchKey, type Game } from "@games/shared";
 import type { SteamOwnedGame } from "./steam";
 
+/** A Game as the Import plans with it: the API Game plus the private Steam app IDs a Merge kept. */
+export type ImportableGame = Game & { mergedSteamAppIds?: number[] };
+
 /** What happens to one library entry. Every step names the Steam app it came from. */
 export type ImportStep =
   /** The target Game already has a Copy on this Account (imported earlier, or added by hand). */
@@ -29,15 +32,19 @@ export const importName = (app: SteamOwnedGame) => cleanGameName(app.name) ?? `S
  * other Copies too, the Unknown Copy is left alone and a Copy is added. Other Copies are never
  * changed. Duplicate app IDs in the library are counted once.
  */
-export function planSteamImport(library: SteamOwnedGame[], games: Game[], accountId: string): ImportStep[] {
+export function planSteamImport(library: SteamOwnedGame[], games: ImportableGame[], accountId: string): ImportStep[] {
   const byAppId = new Map<number, Game>();
   const manualByName = new Map<string, Game[]>();
   for (const g of [...games].sort((a, b) => a.createdAt - b.createdAt)) {
+    // A merged Game also matches the other Games' Steam app IDs (Merge Games, ticket 09).
+    for (const id of g.mergedSteamAppIds ?? []) byAppId.set(id, g);
     if (g.steamAppId !== undefined) byAppId.set(g.steamAppId, g);
     else manualByName.set(searchKey(g.name), [...(manualByName.get(searchKey(g.name)) ?? []), g]);
   }
 
   const seen = new Set<number>();
+  // Two app IDs can lead to one merged Game: only the first may write it (steps run in parallel).
+  const claimed = new Set<string>();
   const steps: ImportStep[] = [];
   for (const app of library) {
     if (seen.has(app.appId)) continue;
@@ -54,7 +61,9 @@ export function planSteamImport(library: SteamOwnedGame[], games: Game[], accoun
       steps.push({ kind: "newGame", app, name: importName(app) });
       continue;
     }
-    if (game.copies.some((c) => c.accountId === accountId)) {
+    const again = claimed.has(game.id);
+    claimed.add(game.id);
+    if (again || game.copies.some((c) => c.accountId === accountId)) {
       steps.push({ kind: "present", app, gameId: game.id, link });
     } else if (game.copies.length === 1 && isUnknownCopy(game.copies[0])) {
       steps.push({ kind: "fillUnknown", app, gameId: game.id, copyId: game.copies[0].id, link });

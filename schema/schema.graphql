@@ -155,4 +155,7 @@ type Mutation {
   addGameTag(gameId: ID!, tagId: ID!): Game!
   "Take a Tag off a Game. Remembered, so a later Import won't add it back."
   removeGameTag(gameId: ID!, tagId: ID!): Game!
+
+  "Merge Game fromId into intoId: Copies and Tags combine, Owned if either was, Wishlist clears if Owned, Steam app IDs carry over, and fromId is deleted. Play status is the more advanced (Playing > Finished > Backlog > none) unless given (null = none)."
+  mergeGames(fromId: ID!, intoId: ID!, playStatus: PlayStatus): Game!
 }
