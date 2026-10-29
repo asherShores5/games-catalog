@@ -76,6 +76,11 @@ describe("Steam Web API key", () => {
     const fields = Object.values(app.findResources("AWS::AppSync::Resolver")).map((r) => r.Properties.FieldName);
     expect(fields).toEqual(expect.arrayContaining(["setSteamId", "importSteam"]));
   });
+
+  it("the Merge Games mutation has a resolver", () => {
+    const fields = Object.values(app.findResources("AWS::AppSync::Resolver")).map((r) => r.Properties.FieldName);
+    expect(fields).toContain("mergeGames");
+  });
 });
 
 describe("web hosting", () => {

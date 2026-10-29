@@ -7,5 +7,6 @@ export * from "./platform";
 export * from "./tag";
 export * from "./copy";
 export * from "./ownership";
+export * from "./merge";
 export * from "./account";
 export * from "./steam";

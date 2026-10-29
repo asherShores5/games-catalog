@@ -10,6 +10,7 @@ import { Platforms } from "./Platforms";
 import type { Tag } from "@games/shared";
 import { listTags } from "../api";
 import { GameTags } from "./GameTags";
+import { MergeGame } from "./MergeGame";
 import { Tags } from "./Tags";
 
 /** My Games: add one by name, search and filter the list, open one to manage its Copies. */
@@ -103,6 +104,16 @@ export function Games() {
               <>
                 <GameDetail game={g} platforms={platforms} accounts={accounts} onChange={replace} />
                 <GameTags game={g} tags={tags} onChange={replace} onTagsChange={setTags} />
+                <MergeGame
+                  game={g}
+                  games={games}
+                  names={copyNames(platforms, accounts)}
+                  tagName={(id) => tags.find((t) => t.id === id)?.name}
+                  onMerged={(merged, goneId) => {
+                    setGames((gs) => (gs ?? []).filter((x) => x.id !== goneId).map((x) => (x.id === merged.id ? merged : x)));
+                    setOpenId(merged.id);
+                  }}
+                />
               </>
             )}
           />

@@ -104,6 +104,8 @@ export class AppStack extends Stack {
     // Tags (ticket 06).
     ds.createResolver("Qtags", { typeName: "Query", fieldName: "tags" });
     for (const field of ["addTag", "renameTag", "deleteTag", "mergeTags", "addGameTag", "removeGameTag"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
+    // Merge Games (ticket 09).
+    ds.createResolver("MmergeGames", { typeName: "Mutation", fieldName: "mergeGames" });
 
     // The web app's /config.json takes these values (see web/public/config.example.json).
     new CfnOutput(this, "Region", { value: this.region });

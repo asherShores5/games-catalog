@@ -8,7 +8,8 @@ import {
   type SteamImportSummary, type Store,
 } from "@games/shared";
 import {
-  SEED_TAGS, addManualTag, dropTag, mentionsTag, moveTag, removeGameTag as unlinkTag,
+  SEED_TAGS, addManualTag, dropTag, mentionsTag, moveTag, planMerge, removeGameTag as unlinkTag,
+  type MergeSide,
   type GameTag, type GameTags, type Tag,
 } from "@games/shared";
 import {
@@ -101,6 +102,8 @@ interface GameRec extends Partial<GameTags> {
   playStatus: PlayStatus | null;
   /** Set when a Steam Import created or matched this Game. */
   steamAppId?: number;
+  /** Private: other Steam app IDs that match this Game (a Merge of two Steam editions). */
+  mergedSteamAppIds?: number[];
   createdAt: number;
   updatedAt: number;
 }
@@ -112,6 +115,7 @@ function gameRec(rec: Rec): GameRec {
     wishlist: rec.wishlist === true,
     playStatus: (rec.playStatus as PlayStatus | undefined) ?? null,
     steamAppId: rec.steamAppId as number | undefined,
+    mergedSteamAppIds: rec.mergedSteamAppIds as number[] | undefined,
     createdAt: rec.createdAt as number,
     updatedAt: rec.updatedAt as number,
     tags: (rec.tags as GameTag[] | undefined) ?? [],
@@ -150,7 +154,7 @@ const oldestFirst = (a: Copy, b: Copy) => a.createdAt - b.createdAt || (a.id < b
 
 function gameOut(game: GameRec, copies: Copy[]): Game {
   const sorted = [...copies].sort(oldestFirst);
-  const { removedTagIds: _private, ...pub } = game;
+  const { removedTagIds: _private, mergedSteamAppIds: _alsoPrivate, ...pub } = game;
   return { ...pub, tags: game.tags ?? [], copies: sorted, owned: isOwned(sorted) };
 }
 
@@ -639,7 +643,7 @@ async function importSteam(ctx: Ctx, args: { accountId: string }): Promise<Steam
 
   const platform = await steamPlatform(ctx);
   const games = await catalog(ctx);
-  const steps = planSteamImport(library, games.map((c) => gameOut(c.game, c.copies)), accountId);
+  const steps = planSteamImport(library, games.map((c) => ({ ...gameOut(c.game, c.copies), mergedSteamAppIds: c.game.mergedSteamAppIds })), accountId);
   const env = { games: new Map(games.map((c) => [c.game.id, c])), platform, accountId };
 
   const summary: SteamImportSummary = { added: 0, alreadyPresent: 0, failed: 0, addedNames: [] };
@@ -816,6 +820,84 @@ async function removeGameTag(ctx: Ctx, args: { gameId: string; tagId: string }) 
   return gameOut(next, copies);
 }
 
+// ---- Merge Games ---------------------------------------------------------------
+//
+// mergeGames folds Game `fromId` into Game `intoId` (planMerge in shared/merge.ts decides the
+// result) in ONE transaction: the surviving Game Put and the other Game's Delete are both
+// conditioned on the `updatedAt` read, so any racing write to either Game cancels the whole
+// Merge. Each moved Copy is re-keyed from the STORED record (Put under the surviving Game, Delete
+// the old key), so stored-only fields (an Import's `steamAppId`) and the Account move as they
+// are; legacy Digital Copies with no Account aren't re-validated. Redundant Unknown Copies go.
+
+/** DynamoDB's TransactWrite item limit. */
+const TRANSACT_MAX = 100;
+
+async function loadGameRecords(ctx: Ctx, id: unknown): Promise<{ game: GameRec; copyRecs: Rec[] }> {
+  if (typeof id !== "string" || id.includes("#")) throw new UserError("NotFound", "No such Game");
+  const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: gameSk(id) } }));
+  if (!r.Item) throw new UserError("NotFound", "No such Game");
+  return { game: gameRec(r.Item), copyRecs: await queryPrefix(ctx, copyPrefix(id)) };
+}
+
+const mergeSide = (game: GameRec, copyRecs: Rec[]): MergeSide => ({ ...game, tags: game.tags ?? [], copies: copyRecs.map(copyOut) });
+
+async function mergeGames(ctx: Ctx, args: { fromId: string; intoId: string; playStatus?: string | null }) {
+  // An absent playStatus means "keep the more advanced one"; an explicit null means none.
+  const choice = "playStatus" in args ? { playStatus: validatePlayStatus(args.playStatus) } : undefined;
+  if (args.fromId === args.intoId) throw new UserError("ValidationError", "Pick two different Games to merge");
+  const into = await loadGameRecords(ctx, args.intoId);
+  const from = await loadGameRecords(ctx, args.fromId);
+  const plan = planMerge(mergeSide(into.game, into.copyRecs), mergeSide(from.game, from.copyRecs), choice);
+  const dropped = new Set(plan.droppedCopyIds);
+
+  const next: GameRec = {
+    ...into.game,
+    wishlist: plan.wishlist,
+    playStatus: plan.playStatus,
+    steamAppId: plan.steamAppId,
+    mergedSteamAppIds: plan.mergedSteamAppIds.length > 0 ? plan.mergedSteamAppIds : undefined,
+    ...plan.tags,
+    updatedAt: nextUpdatedAt(into.game),
+  };
+  const del = (SK: unknown) => ({ Delete: { TableName: TABLE, Key: { PK: ownerPk(ctx), SK: SK as string } } });
+  const items = [
+    putGameIfUnchanged(ctx, into.game, next),
+    {
+      Delete: {
+        TableName: TABLE,
+        Key: { PK: ownerPk(ctx), SK: gameSk(from.game.id) },
+        ConditionExpression: "updatedAt = :read",
+        ExpressionAttributeValues: { ":read": from.game.updatedAt },
+      },
+    },
+    ...into.copyRecs.filter((r) => dropped.has(r.id as string)).map((r) => del(r.SK)),
+    ...from.copyRecs.flatMap((r) =>
+      dropped.has(r.id as string)
+        ? [del(r.SK)]
+        : [
+            {
+              Put: {
+                TableName: TABLE,
+                Item: { ...r, PK: ownerPk(ctx), SK: copyPrefix(into.game.id) + (r.id as string), gameId: into.game.id },
+                ConditionExpression: "attribute_not_exists(PK)",
+              },
+            },
+            del(r.SK),
+          ],
+    ),
+  ];
+  if (items.length > TRANSACT_MAX) {
+    throw new UserError("ValidationError", "Too many Copies to merge in one go; remove some from the other Game first");
+  }
+  try {
+    await ddb.send(new TransactWriteCommand({ TransactItems: items }));
+  } catch (e) {
+    if (cancellationCodes(e)) throw changedMeanwhile();
+    throw e;
+  }
+  return gameOut(next, plan.copies);
+}
+
 // ---- Seed --------------------------------------------------------------------
 //
 // Not a resolver: scripts/seed.ts calls this in-process for one explicit owner (ticket 12 runs it
@@ -871,6 +953,7 @@ const RESOLVERS: Record<string, (ctx: Ctx, args: any) => Promise<unknown>> = {
   platforms, addPlatform, renamePlatform, deletePlatform,
   accounts, addAccount, renameAccount, deleteAccount, setSteamId, importSteam,
   tags, addTag, renameTag, deleteTag, mergeTags, addGameTag, removeGameTag,
+  mergeGames,
 };
 
 export async function handler(event: AppSyncResolverEvent<Record<string, unknown>>) {
