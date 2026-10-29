@@ -77,8 +77,8 @@ export class AppStack extends Stack {
       logConfig: { fieldLogLevel: appsync.FieldLogLevel.ERROR, retention: logs.RetentionDays.TWO_WEEKS },
     });
     const ds = api.addLambdaDataSource("ApiDs", fn);
-    for (const field of ["games", "platforms"]) ds.createResolver(`Q${field}`, { typeName: "Query", fieldName: field });
-    for (const field of ["addGame", "addCopy", "removeCopy", "setPlayStatus", "setWishlist", "addPlatform", "renamePlatform", "deletePlatform"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
+    for (const field of ["games", "platforms", "accounts"]) ds.createResolver(`Q${field}`, { typeName: "Query", fieldName: field });
+    for (const field of ["addGame", "addCopy", "removeCopy", "setPlayStatus", "setWishlist", "addPlatform", "renamePlatform", "deletePlatform", "addAccount", "renameAccount", "deleteAccount"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
 
     // The web app's /config.json takes these values (see web/public/config.example.json).
     new CfnOutput(this, "Region", { value: this.region });

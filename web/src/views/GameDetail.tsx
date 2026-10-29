@@ -1,16 +1,32 @@
 import { useState } from "react";
-import { EDITION_MAX, FORMATS, PLAY_STATUSES, canWishlist, type Format, type Game, type Platform, type PlayStatus } from "@games/shared";
+import {
+  EDITION_MAX, FORMATS, PLAY_STATUSES, accountLabel, canWishlist, needsAccount,
+  type Account, type Format, type Game, type Platform, type PlayStatus,
+} from "@games/shared";
 import { addCopy, removeCopy, setPlayStatus, setWishlist } from "../api";
 
 /** One Game opened: its Copies (add/remove), Play status and Wishlist. */
-export function GameDetail({ game, platforms, onChange }: { game: Game; platforms: Platform[]; onChange: (g: Game) => void }) {
+export function GameDetail({ game, platforms, accounts, onChange }: {
+  game: Game;
+  platforms: Platform[];
+  accounts: Account[];
+  onChange: (g: Game) => void;
+}) {
   const [platformId, setPlatformId] = useState(platforms[0]?.id ?? "");
   const [format, setFormat] = useState<Format>("Digital");
+  const [accountId, setAccountId] = useState(accounts[0]?.id ?? "");
   const [edition, setEdition] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string>();
 
   const platformName = (id: string) => platforms.find((p) => p.id === id)?.name ?? "Unknown Platform";
+  const accountName = (id: string | undefined) => {
+    const a = id && accounts.find((x) => x.id === id);
+    return a ? accountLabel(a) : id ? "Unknown Account" : "no Account";
+  };
+  // A Digital Copy needs an Account; Physical never sends one.
+  const chosenAccount = accountId || accounts[0]?.id;
+  const accountMissing = needsAccount(format) && !chosenAccount;
 
   async function run(action: () => Promise<Game>) {
     setBusy(true);
@@ -29,8 +45,11 @@ export function GameDetail({ game, platforms, onChange }: { game: Game; platform
   async function submitCopy(e: React.FormEvent) {
     e.preventDefault();
     const chosen = platformId || platforms[0]?.id;
-    if (!chosen) return;
-    if (await run(() => addCopy({ gameId: game.id, platformId: chosen, format, edition: edition.trim() || undefined }))) setEdition("");
+    if (!chosen || accountMissing) return;
+    const account = needsAccount(format) ? chosenAccount : undefined;
+    if (await run(() => addCopy({ gameId: game.id, platformId: chosen, format, accountId: account, edition: edition.trim() || undefined }))) {
+      setEdition("");
+    }
   }
 
   return (
@@ -40,6 +59,7 @@ export function GameDetail({ game, platforms, onChange }: { game: Game; platform
           <li key={c.id}>
             <span>
               {platformName(c.platformId)} · {c.format}
+              {needsAccount(c.format) && ` · ${accountName(c.accountId)}`}
               {c.edition && ` · ${c.edition}`}
             </span>
             <button className="link" disabled={busy} onClick={() => void run(() => removeCopy(game.id, c.id))}>Remove</button>
@@ -59,8 +79,16 @@ export function GameDetail({ game, platforms, onChange }: { game: Game; platform
             <option key={f}>{f}</option>
           ))}
         </select>
+        {needsAccount(format) && (
+          <select value={chosenAccount ?? ""} onChange={(e) => setAccountId(e.target.value)} aria-label="Account">
+            {accounts.length === 0 && <option value="">Add an Account first</option>}
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>{accountLabel(a)}</option>
+            ))}
+          </select>
+        )}
         <input placeholder="Edition (optional)" value={edition} onChange={(e) => setEdition(e.target.value)} maxLength={EDITION_MAX} />
-        <button className="primary" disabled={busy || platforms.length === 0}>Add Copy</button>
+        <button className="primary" disabled={busy || platforms.length === 0 || accountMissing}>Add Copy</button>
       </form>
 
       <div className="add">

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { byName, canWishlist, cleanGameName, type Game, type Platform } from "@games/shared";
-import { addGame, listGames, listPlatforms } from "../api";
+import { byName, canWishlist, cleanGameName, type Account, type Game, type Platform } from "@games/shared";
+import { addGame, listAccounts, listGames, listPlatforms } from "../api";
 import { signOut } from "../auth";
+import { Accounts } from "./Accounts";
 import { GameDetail } from "./GameDetail";
 import { Platforms } from "./Platforms";
 
@@ -14,10 +15,13 @@ export function Games() {
   const [error, setError] = useState<string>();
   const [openId, setOpenId] = useState<string>();
   const [showPlatforms, setShowPlatforms] = useState(false);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [showAccounts, setShowAccounts] = useState(false);
 
   useEffect(() => {
     listGames().then(setGames, (e) => setError(String(e.message ?? e)));
     listPlatforms().then(setPlatforms, (e) => setError(String(e.message ?? e)));
+    listAccounts().then(setAccounts, (e) => setError(String(e.message ?? e)));
   }, []);
 
   const replace = (game: Game) => setGames((gs) => (gs ?? []).map((g) => (g.id === game.id ? game : g)));
@@ -42,6 +46,9 @@ export function Games() {
   if (showPlatforms) {
     return <Platforms platforms={platforms} onChange={setPlatforms} onClose={() => setShowPlatforms(false)} />;
   }
+  if (showAccounts) {
+    return <Accounts accounts={accounts} onChange={setAccounts} onClose={() => setShowAccounts(false)} />;
+  }
 
   return (
     <main>
@@ -49,6 +56,7 @@ export function Games() {
         <h1>Games</h1>
         <span>
           <button className="link" onClick={() => setShowPlatforms(true)}>Platforms</button>
+          <button className="link" onClick={() => setShowAccounts(true)}>Accounts</button>
           <button className="link" onClick={() => void signOut()}>Sign out</button>
         </span>
       </header>
@@ -73,7 +81,7 @@ export function Games() {
                   {g.playStatus && <span className="badge">{g.playStatus}</span>}
                 </span>
               </button>
-              {openId === g.id && <GameDetail game={g} platforms={platforms} onChange={replace} />}
+              {openId === g.id && <GameDetail game={g} platforms={platforms} accounts={accounts} onChange={replace} />}
             </li>
           ))}
         </ul>
