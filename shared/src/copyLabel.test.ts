@@ -31,3 +31,13 @@ describe("a Copy in the Game list", () => {
     ]);
   });
 });
+
+describe("an Unknown Copy in the Game list", () => {
+  it("shows location unknown instead of Platform and Format", () => {
+    expect(copyParts({}, names)).toEqual(["location unknown"]);
+  });
+
+  it("still shows its Edition", () => {
+    expect(copyParts({ edition: "GOTY" }, names)).toEqual(["location unknown", "GOTY"]);
+  });
+});

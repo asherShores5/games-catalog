@@ -90,7 +90,7 @@ export class AppStack extends Stack {
 
     const ds = api.addLambdaDataSource("ApiDs", fn);
     for (const field of ["games", "platforms", "accounts"]) ds.createResolver(`Q${field}`, { typeName: "Query", fieldName: field });
-    for (const field of ["addGame", "addCopy", "removeCopy", "setPlayStatus", "setWishlist", "addPlatform", "renamePlatform", "deletePlatform", "addAccount", "renameAccount", "deleteAccount"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
+    for (const field of ["addGame", "addCopy", "fillUnknownCopy", "removeCopy", "setPlayStatus", "setWishlist", "addPlatform", "renamePlatform", "deletePlatform", "addAccount", "renameAccount", "deleteAccount"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
     // Tags (ticket 06).
     ds.createResolver("Qtags", { typeName: "Query", fieldName: "tags" });
     for (const field of ["addTag", "renameTag", "deleteTag", "mergeTags", "addGameTag", "removeGameTag"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
