@@ -163,6 +163,7 @@ export class FakeDocClient {
     const actions = (input.TransactItems ?? []).map((t) => {
       if (t.Put) return { key: keyOf(t.Put.Item!), item: t.Put.Item as Rec, ...t.Put };
       if (t.Delete) return { key: keyOf(t.Delete.Key!), item: undefined, ...t.Delete };
+      if (t.ConditionCheck) return { key: keyOf(t.ConditionCheck.Key!), item: undefined, checkOnly: true, ...t.ConditionCheck };
       return unsupported("transaction action", Object.keys(t).join(","));
     });
     if (new Set(actions.map((a) => a.key)).size !== actions.length) unsupported("transaction", "two actions on one item");
@@ -174,6 +175,7 @@ export class FakeDocClient {
     );
     if (reasons.some((r) => r.Code !== "None")) throw new TransactionCanceledException(reasons);
     for (const a of actions) {
+      if ("checkOnly" in a) continue;
       if (a.item) this.table.set(a.key, clean(a.item));
       else this.table.delete(a.key);
     }
