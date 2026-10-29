@@ -3,11 +3,12 @@ import { accountLabel, byName, cleanGameName, type Account, type CopyNames, type
 import { addGame, listAccounts, listGames, listPlatforms } from "../api";
 import { signOut } from "../auth";
 import { Accounts } from "./Accounts";
+import { FilterBar, useUrlFilter } from "./FilterBar";
 import { GameDetail } from "./GameDetail";
 import { GameList } from "./GameList";
 import { Platforms } from "./Platforms";
 
-/** My Games: add one by name, search the list, open one to manage its Copies. */
+/** My Games: add one by name, search and filter the list, open one to manage its Copies. */
 export function Games() {
   const [games, setGames] = useState<Game[]>();
   const [platforms, setPlatforms] = useState<Platform[]>([]);
@@ -18,7 +19,7 @@ export function Games() {
   const [showPlatforms, setShowPlatforms] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [showAccounts, setShowAccounts] = useState(false);
-  const [query, setQuery] = useState("");
+  const [filter, setFilter] = useUrlFilter();
 
   useEffect(() => {
     listGames().then(setGames, (e) => setError(String(e.message ?? e)));
@@ -71,10 +72,10 @@ export function Games() {
         <p>Loading…</p>
       ) : (
         <>
-          <input type="search" className="search" placeholder="Search Games" aria-label="Search Games" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <FilterBar filter={filter} onChange={setFilter} platforms={platforms} />
           <GameList
             games={games}
-            filter={{ query }}
+            filter={filter}
             names={copyNames(platforms, accounts)}
             openId={openId}
             onToggle={(id) => setOpenId(openId === id ? undefined : id)}
