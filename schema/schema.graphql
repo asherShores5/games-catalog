@@ -1,0 +1,22 @@
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+"One title, however many ways it is owned. See GLOSSARY.md."
+type Game {
+  id: ID!
+  name: String!
+  createdAt: Float!
+  updatedAt: Float!
+}
+
+type Query {
+  "The signed-in owner's Games, in name order."
+  games: [Game!]!
+}
+
+type Mutation {
+  "Add a Game by name (trimmed, 1-200 characters)."
+  addGame(name: String!): Game!
+}
