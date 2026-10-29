@@ -27,4 +27,21 @@ describe("fakeDynamo matches DynamoDB", () => {
     });
     expect(db.dump().map((r) => r.SK)).toEqual(["a"]);
   });
+
+  it("a ConditionCheck in a transaction gates the writes without writing itself", async () => {
+    const db = new FakeDocClient();
+    const tx = (check: string) =>
+      new TransactWriteCommand({
+        TransactItems: [
+          { ConditionCheck: { TableName: "t", Key: { PK: "p", SK: "gate" }, ConditionExpression: check } },
+          { Put: { TableName: "t", Item: { PK: "p", SK: "b" } } },
+        ],
+      });
+    await expect(db.send(tx("attribute_exists(PK)"))).rejects.toMatchObject({
+      CancellationReasons: [{ Code: "ConditionalCheckFailed" }, { Code: "None" }],
+    });
+    expect(db.dump()).toEqual([]);
+    await db.send(tx("attribute_not_exists(PK)"));
+    expect(db.dump().map((r) => r.SK)).toEqual(["b"]);
+  });
 });
