@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { byName, canWishlist, cleanGameName, type Game, type Platform } from "@games/shared";
+import { byName, cleanGameName, type CopyNames, type Game, type Platform } from "@games/shared";
 import { addGame, listGames, listPlatforms } from "../api";
 import { signOut } from "../auth";
 import { GameDetail } from "./GameDetail";
+import { GameList } from "./GameList";
 import { Platforms } from "./Platforms";
 
-/** My Games: add one by name, see the list, open one to manage its Copies. */
+/** My Games: add one by name, search the list, open one to manage its Copies. */
 export function Games() {
   const [games, setGames] = useState<Game[]>();
   const [platforms, setPlatforms] = useState<Platform[]>([]);
@@ -14,6 +15,7 @@ export function Games() {
   const [error, setError] = useState<string>();
   const [openId, setOpenId] = useState<string>();
   const [showPlatforms, setShowPlatforms] = useState(false);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     listGames().then(setGames, (e) => setError(String(e.message ?? e)));
@@ -59,25 +61,24 @@ export function Games() {
       {error && <p className="error">{error}</p>}
       {!games ? (
         <p>Loading…</p>
-      ) : games.length === 0 ? (
-        <p className="empty">No Games yet.</p>
       ) : (
-        <ul className="games">
-          {games.map((g) => (
-            <li key={g.id}>
-              <button className="row" onClick={() => setOpenId(openId === g.id ? undefined : g.id)} aria-expanded={openId === g.id}>
-                <span>{g.name}</span>
-                <span className="badges">
-                  {g.owned && <span className="badge">{g.copies.length === 1 ? "1 Copy" : `${g.copies.length} Copies`}</span>}
-                  {g.wishlist && canWishlist(g.copies) && <span className="badge">Wishlist</span>}
-                  {g.playStatus && <span className="badge">{g.playStatus}</span>}
-                </span>
-              </button>
-              {openId === g.id && <GameDetail game={g} platforms={platforms} onChange={replace} />}
-            </li>
-          ))}
-        </ul>
+        <>
+          <input type="search" className="search" placeholder="Search Games" aria-label="Search Games" value={query} onChange={(e) => setQuery(e.target.value)} />
+          <GameList
+            games={games}
+            filter={{ query }}
+            names={copyNames(platforms)}
+            openId={openId}
+            onToggle={(id) => setOpenId(openId === id ? undefined : id)}
+            renderDetail={(g) => <GameDetail game={g} platforms={platforms} onChange={replace} />}
+          />
+        </>
       )}
     </main>
   );
+}
+
+/** Id-to-name lookups for the Copies shown in the list. */
+function copyNames(platforms: Platform[]): CopyNames {
+  return { platformName: (id) => platforms.find((p) => p.id === id)?.name ?? "Unknown Platform" };
 }
