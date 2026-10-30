@@ -731,8 +731,10 @@ async function lookUpStoreTags(ctx: Ctx, steps: ImportStep[], started: number): 
   if (names.size === 0) return new Map();
 
   // My renames, merges and deletes decide where each store name lands (matchImportTag).
-  const known = await allTagRecs(ctx);
-  const dropped = await droppedTagNames(ctx);
+  // A Tag being deleted or merged away takes no new links, and its names count as dropped.
+  const recs = await allTagRecs(ctx);
+  const known: ImportableTag[] = recs.filter((t) => !t.retiring);
+  const dropped = [...(await droppedTagNames(ctx)), ...recs.filter((t) => t.retiring).flatMap((t) => [t.name, ...t.aliases])];
   const idFor = new Map<string, string | undefined>();
   const tagIdFor = async (name: string) => {
     const match = matchImportTag(name, known, dropped);
@@ -793,12 +795,19 @@ function tagOut(rec: Rec): Tag {
   return { id: rec.id as string, name: rec.name as string };
 }
 
-/** The Tag with its private `aliases` (former names, merged-away names), for Imports. */
-function importableTag(rec: Rec): ImportableTag {
-  return { ...tagOut(rec), aliases: (rec.aliases as string[] | undefined) ?? [] };
+/**
+ * The stored Tag: its private `aliases` (former names, merged-away names, for Imports) and
+ * `retiring` (a delete or merge started and hasn't finished).
+ */
+interface TagRec extends ImportableTag {
+  retiring: boolean;
 }
 
-async function allTagRecs(ctx: Ctx): Promise<ImportableTag[]> {
+function importableTag(rec: Rec): TagRec {
+  return { ...tagOut(rec), aliases: (rec.aliases as string[] | undefined) ?? [], retiring: rec.retiring === true };
+}
+
+async function allTagRecs(ctx: Ctx): Promise<TagRec[]> {
   await ensureTags(ctx);
   return (await queryPrefix(ctx, "TAG#")).map(importableTag);
 }
@@ -807,7 +816,7 @@ async function allTags(ctx: Ctx) {
   return (await allTagRecs(ctx)).map(({ id, name }): Tag => ({ id, name })).sort(byName);
 }
 
-async function getTagRec(ctx: Ctx, id: unknown): Promise<ImportableTag> {
+async function getTagRec(ctx: Ctx, id: unknown): Promise<TagRec> {
   if (typeof id !== "string") throw new UserError("NotFound", "No such Tag");
   await ensureTags(ctx);
   const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(id) } }));
@@ -880,9 +889,11 @@ async function setTagAliases(ctx: Ctx, read: ImportableTag, aliases: string[], n
 
 /**
  * Rewrite every Game whose Tag state mentions `tagId` (Tag delete and merge). Runs after the Tag
- * record is gone: addGameTag conditions on the Tag existing, so no new link can land behind the
- * scan. Each Game write keeps the changed-since-read guard; a Game that changes meanwhile is
- * re-read and retried.
+ * is marked retiring and before its record goes: addGameTag conditions on the Tag existing and
+ * not retiring, so no new link can land behind the scan, and if a rewrite gives up the Tag is
+ * still there (no Game points at a missing Tag) and the delete or merge can simply be re-run.
+ * Each Game write keeps the changed-since-read guard; a Game that changes meanwhile is re-read
+ * and retried.
  */
 async function rewriteGamesMentioning(ctx: Ctx, tagId: string, change: (g: GameTags) => GameTags) {
   const recs = (await queryPrefix(ctx, "GAME#")).filter((r) => !isCopyRec(r)).map(gameRec);
@@ -903,17 +914,32 @@ async function rewriteGamesMentioning(ctx: Ctx, tagId: string, change: (g: GameT
 /** I delete a Tag. Its names (current and aliases) are remembered so Imports don't re-create it. */
 async function deleteTag(ctx: Ctx, args: { id: string }) {
   const tag = await getTagRec(ctx, args.id);
+  await markRetiring(ctx, tag.id);
+  await rewriteGamesMentioning(ctx, tag.id, (g) => dropTag(g, tag.id));
   const dropped = addTagNames([], tag.name, ...tag.aliases);
   await ddb.send(
     new TransactWriteCommand({
       TransactItems: [
         { Delete: { TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) } } },
+        // One record per name; a Tag with more aliases than a transaction holds forgets the rest.
         ...dropped.map((name) => ({ Put: { TableName: TABLE, Item: { PK: ownerPk(ctx), SK: droppedTagSk(name), name } } })),
       ].slice(0, TRANSACT_MAX),
     }),
   );
-  await rewriteGamesMentioning(ctx, tag.id, (g) => dropTag(g, tag.id));
   return tag.id;
+}
+
+/** A Tag on its way out (delete or merge): no new links may land on it. Re-running the delete or merge finishes it. */
+async function markRetiring(ctx: Ctx, tagId: string) {
+  await ddb.send(
+    new UpdateCommand({
+      TableName: TABLE,
+      Key: { PK: ownerPk(ctx), SK: tagSk(tagId) },
+      UpdateExpression: "SET retiring = :t",
+      ConditionExpression: "attribute_exists(PK)",
+      ExpressionAttributeValues: { ":t": true },
+    }),
+  );
 }
 
 /**
@@ -924,9 +950,11 @@ async function mergeTags(ctx: Ctx, args: { fromId: string; intoId: string }) {
   const from = await getTagRec(ctx, args.fromId);
   const into = await getTagRec(ctx, args.intoId);
   if (from.id === into.id) throw new UserError("ValidationError", "Pick two different Tags to merge");
+  if (into.retiring) throw new UserError("ValidationError", `"${into.name}" is being deleted; finish that first`);
+  await markRetiring(ctx, from.id);
   await setTagAliases(ctx, into, addTagNames(into.aliases, from.name, ...from.aliases));
-  await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(from.id) } }));
   await rewriteGamesMentioning(ctx, from.id, (g) => moveTag(g, from.id, into.id));
+  await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(from.id) } }));
   return { id: into.id, name: into.name };
 }
 
@@ -942,8 +970,15 @@ async function addGameTag(ctx: Ctx, args: { gameId: string; tagId: string }) {
       new TransactWriteCommand({
         TransactItems: [
           putGameIfUnchanged(ctx, game, next),
-          // The Tag must still exist when the link lands: a delete or merge may be racing us.
-          { ConditionCheck: { TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) }, ConditionExpression: "attribute_exists(PK)" } },
+          // The Tag must still exist, and not be on its way out, when the link lands: a delete or
+          // merge may be racing us.
+          {
+            ConditionCheck: {
+              TableName: TABLE,
+              Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) },
+              ConditionExpression: "attribute_exists(PK) AND attribute_not_exists(retiring)",
+            },
+          },
         ],
       }),
     );
