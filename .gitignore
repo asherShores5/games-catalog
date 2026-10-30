@@ -7,3 +7,4 @@ cdk-outputs.json
 .DS_Store
 web/public/config.json
 .scratch/
+e2e/out/
