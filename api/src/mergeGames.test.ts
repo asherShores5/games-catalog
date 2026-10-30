@@ -142,6 +142,23 @@ describe("Merge Games and Steam Imports", () => {
     expect((await allGames()).map((g: { id: string }) => g.id)).toEqual([mine.id]);
   });
 
+  it("merging an Imported Game into a manual one keeps its store Tag lookup time, so the store isn't asked again", async () => {
+    const steam = await steamAccount();
+    const mine = await h.call(h.owner, "addGame", { name: "Half-Life 2" });
+    await h.call(h.owner, "addCopy", { gameId: mine.id, platformId: await platformId("PS5"), format: "Physical" });
+    h.steam.set(STEAM_ID, [{ appId: 220, name: "Half-Life 2: Complete" }]);
+    await h.call(h.owner, "importSteam", { accountId: steam.id });
+    const imported = (await allGames()).find((g: { id: string }) => g.id !== mine.id);
+    const lookedUpAt = gameRecord(imported.id).storeTagsAt;
+
+    await h.call(h.owner, "mergeGames", { fromId: imported.id, intoId: mine.id });
+
+    expect(gameRecord(mine.id).storeTagsAt).toBe(lookedUpAt);
+    h.steam.detailCalls = [];
+    await h.call(h.owner, "importSteam", { accountId: steam.id });
+    expect(h.steam.detailCalls).toEqual([]);
+  });
+
   it("two Steam editions (different app IDs) merged: an Import matches both to the one Game", async () => {
     const steam = await steamAccount();
     h.steam.set(STEAM_ID, [{ appId: 72850, name: "The Elder Scrolls V: Skyrim" }, { appId: 489830, name: "Skyrim Special Edition" }]);

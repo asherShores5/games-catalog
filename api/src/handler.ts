@@ -1001,6 +1001,8 @@ async function mergeGames(ctx: Ctx, args: { fromId: string; intoId: string; play
     playStatus: plan.playStatus,
     steamAppId: plan.steamAppId,
     mergedSteamAppIds: plan.mergedSteamAppIds.length > 0 ? plan.mergedSteamAppIds : undefined,
+    // The store Tag lookup belongs to the Steam app ID the merged Game keeps (planMerge: into's, else from's).
+    storeTagsAt: into.game.steamAppId !== undefined ? into.game.storeTagsAt : from.game.storeTagsAt,
     ...plan.tags,
     updatedAt: nextUpdatedAt(into.game),
   };
