@@ -10,6 +10,8 @@ describe("filter in the URL", () => {
 
   it("writes readable, stable params and nothing for unset fields", () => {
     expect(filterToUrl({ query: "half life", ownership: "wishlist" })).toBe("q=half+life&show=wishlist");
+    expect(filterToUrl({ ownership: "all" })).toBe("show=all");
+    expect(filterFromUrl("?show=all")).toEqual({ ownership: "all" });
     expect(filterToUrl({ playStatus: "Playing", platformId: "ps5", query: "x" })).toBe("q=x&platform=ps5&status=Playing");
     expect(filterToUrl({})).toBe("");
     expect(filterToUrl({ query: "" })).toBe("");

@@ -35,9 +35,10 @@ export function FilterBar({ filter, onChange, platforms, tags = [] }: {
           {!knownPlatform && <option value={filter.platformId}>Unknown Platform</option>}
         </select>
         <select aria-label="Wishlist or Owned" value={filter.ownership ?? ""} onChange={(e) => set({ ownership: (e.target.value || undefined) as Ownership | undefined })}>
-          <option value="">Owned or not</option>
+          <option value="">Not on Wishlist</option>
           <option value="owned">Owned</option>
           <option value="wishlist">Wishlist</option>
+          <option value="all">All, Wishlist too</option>
         </select>
         <select aria-label="Play status" value={filter.playStatus ?? ""} onChange={(e) => set({ playStatus: (e.target.value || undefined) as PlayStatus | undefined })}>
           <option value="">Any Play status</option>
