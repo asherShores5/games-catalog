@@ -18,7 +18,7 @@
 
 **Unknown Copy**: A Copy whose Platform and Format aren't known yet (the Seed knows a Game is owned, not where). Counts toward Owned; shown as "location unknown" until filled in.
 
-**Wishlist**: A Game you don't own but want. Cleared automatically when a Copy is added.
+**Wishlist**: A Game you don't own but want. Cleared automatically when a Copy is added. Hidden from the Game list unless the filter is set to Wishlist or All.
 
 **Play status**: Playing, Backlog, Finished, or none. Independent of ownership.
 
