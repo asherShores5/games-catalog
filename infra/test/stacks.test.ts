@@ -46,23 +46,42 @@ describe("auth", () => {
   });
 });
 
+describe("cost guardrail", () => {
+  it("a $1 monthly budget on this app's tag emails at 80% actual and 100% forecast", () => {
+    app.hasResourceProperties("AWS::Budgets::Budget", {
+      Budget: Match.objectLike({
+        BudgetType: "COST",
+        TimeUnit: "MONTHLY",
+        BudgetLimit: { Amount: 1, Unit: "USD" },
+        CostFilters: { TagKeyValue: ["user:app$games-catalog"] },
+      }),
+      NotificationsWithSubscribers: [
+        Match.objectLike({ Notification: { NotificationType: "ACTUAL", ComparisonOperator: "GREATER_THAN", Threshold: 80 } }),
+        Match.objectLike({ Notification: { NotificationType: "FORECASTED", ComparisonOperator: "GREATER_THAN", Threshold: 100 } }),
+      ],
+    });
+  });
+});
+
 describe("Steam Web API key", () => {
   const statements = () =>
     Object.values(app.findResources("AWS::IAM::Policy")).flatMap((p) => p.Properties.PolicyDocument.Statement as any[]);
   const actions = (s: any) => [s.Action].flat() as string[];
 
-  it("the API Lambda can read only the one Steam key secret, by name", () => {
-    const sm = statements().filter((s) => actions(s).some((a) => a.startsWith("secretsmanager:")));
-    expect(sm).toHaveLength(1);
-    expect(actions(sm[0]).sort()).toEqual(["secretsmanager:DescribeSecret", "secretsmanager:GetSecretValue"]);
-    expect(JSON.stringify(sm[0].Resource)).toContain(":secret:games-catalog/steam-web-api-key-??????");
-    expect(JSON.stringify(sm[0].Resource)).not.toContain('"*"');
+  it("the API Lambda can read only the one Steam key parameter, by name, and nothing in Secrets Manager", () => {
+    const ssm = statements().filter((s) => actions(s).some((a) => a.startsWith("ssm:")));
+    expect(ssm).toHaveLength(1);
+    expect(actions(ssm[0])).toEqual(["ssm:GetParameter"]);
+    expect(JSON.stringify(ssm[0].Resource)).toContain(":parameter/games-catalog/steam-web-api-key");
+    expect(JSON.stringify(ssm[0].Resource)).not.toContain('"*"');
+    expect(statements().filter((s) => actions(s).some((a) => a.startsWith("secretsmanager:")))).toHaveLength(0);
   });
 
-  it("gets the secret's name, never a value, and CDK creates no secret", () => {
+  it("gets the parameter's name, never a value, and CDK creates no parameter or secret", () => {
+    app.resourceCountIs("AWS::SSM::Parameter", 0);
     app.resourceCountIs("AWS::SecretsManager::Secret", 0);
     app.hasResourceProperties("AWS::Lambda::Function", {
-      Environment: { Variables: Match.objectLike({ STEAM_KEY_SECRET_NAME: "games-catalog/steam-web-api-key" }) },
+      Environment: { Variables: Match.objectLike({ STEAM_KEY_PARAM_NAME: "/games-catalog/steam-web-api-key" }) },
     });
   });
 

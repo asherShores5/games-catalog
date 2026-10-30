@@ -1,9 +1,9 @@
 // The real Steam client against a fake fetch: no network. Checks what it asks Steam, how it reads
 // the answer, and that the key and Steam ID never end up in an error.
-import { ResourceNotFoundException } from "@aws-sdk/client-secrets-manager";
+import { ParameterNotFound } from "@aws-sdk/client-ssm";
 import { describe, expect, it } from "vitest";
 import { SteamError } from "./steam";
-import { secretsManagerKey, steamWebApi } from "./steamWebApi";
+import { ssmKey, steamWebApi } from "./steamWebApi";
 
 const KEY = "FAKEKEY0123456789ABCDEF";
 const STEAM_ID = "76561190000000001";
@@ -68,8 +68,8 @@ describe("Steam Web API client", () => {
   });
 });
 
-describe("Secrets Manager key", () => {
-  const sm = (answer: { SecretString?: string } | Error) => {
+describe("SSM key", () => {
+  const ssm = (answer: { Parameter?: { Value?: string } } | Error) => {
     const calls: unknown[] = [];
     return {
       calls,
@@ -81,19 +81,19 @@ describe("Secrets Manager key", () => {
     };
   };
 
-  it("reads the named secret once and caches it", async () => {
-    const c = sm({ SecretString: ` ${KEY}\n` });
-    const getKey = secretsManagerKey("games-catalog/steam-web-api-key", c as never);
+  it("reads the named SecureString once, decrypted, and caches it", async () => {
+    const c = ssm({ Parameter: { Value: ` ${KEY}\n` } });
+    const getKey = ssmKey("/games-catalog/steam-web-api-key", c as never);
     expect(await getKey()).toBe(KEY);
     expect(await getKey()).toBe(KEY);
-    expect(c.calls).toEqual([{ SecretId: "games-catalog/steam-web-api-key" }]);
+    expect(c.calls).toEqual([{ Name: "/games-catalog/steam-web-api-key", WithDecryption: true }]);
   });
 
-  it("no secret name, no secret or an empty secret all mean not set up", async () => {
-    expect(await secretsManagerKey(undefined, sm({ SecretString: KEY }) as never)()).toBeUndefined();
-    const missing = new ResourceNotFoundException({ message: "not found", $metadata: {} });
-    expect(await secretsManagerKey("x", sm(missing) as never)()).toBeUndefined();
-    expect(await secretsManagerKey("x", sm({ SecretString: "  " }) as never)()).toBeUndefined();
+  it("no parameter name, no parameter or an empty value all mean not set up", async () => {
+    expect(await ssmKey(undefined, ssm({ Parameter: { Value: KEY } }) as never)()).toBeUndefined();
+    const missing = new ParameterNotFound({ message: "not found", $metadata: {} });
+    expect(await ssmKey("x", ssm(missing) as never)()).toBeUndefined();
+    expect(await ssmKey("x", ssm({ Parameter: { Value: "  " } }) as never)()).toBeUndefined();
   });
 });
 
