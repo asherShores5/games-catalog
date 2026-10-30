@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { accountLabel, byName, cleanGameName, type Account, type CopyNames, type Game, type Platform } from "@games/shared";
+import { accountLabel, byName, cleanGameName, withoutUnknownTags, type Account, type CopyNames, type Game, type Platform } from "@games/shared";
 import { addGame, listAccounts, listGames, listPlatforms } from "../api";
 import { signOut } from "../auth";
 import { Accounts } from "./Accounts";
@@ -28,9 +28,24 @@ export function Games() {
   const [tags, setTags] = useState<Tag[]>([]);
   const [showTags, setShowTags] = useState(false);
 
+  const [tagsLoaded, setTagsLoaded] = useState(false);
+
   useEffect(() => {
-    listTags().then(setTags, (e) => setError(String(e.message ?? e)));
+    listTags().then(
+      (ts) => {
+        setTags(ts);
+        setTagsLoaded(true);
+      },
+      (e) => setError(String(e.message ?? e)),
+    );
   }, []);
+
+  // Once Tags are known, drop Tag ids from the filter (and so the URL) that no longer exist.
+  useEffect(() => {
+    if (!tagsLoaded) return;
+    const pruned = withoutUnknownTags(filter, tags);
+    if (pruned !== filter) setFilter(pruned);
+  }, [tagsLoaded, tags, filter, setFilter]);
 
   useEffect(() => {
     listGames().then(setGames, (e) => setError(String(e.message ?? e)));

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gameMatches, matchesName } from "./search";
+import { gameMatches, matchesName, withoutUnknownTags } from "./search";
 
 describe("name search", () => {
   it("matches anywhere in the name, ignoring case", () => {
@@ -149,5 +149,24 @@ describe("Tag filter", () => {
     expect(names({ tagIds: ["coop", "open-world"], platformId: "pc" })).toEqual(["Valheim"]);
     expect(names({ tagIds: ["open-world"], query: "ring" })).toEqual(["Elden Ring"]);
     expect(names({ tagIds: ["coop"], ownership: "owned" })).toEqual(["It Takes Two", "Valheim"]);
+  });
+});
+
+describe("pruning Tags that no longer exist from the filter", () => {
+  const tags = [{ id: "coop", name: "co-op" }, { id: "rpg", name: "RPG" }];
+
+  it("drops Tag ids I've since deleted or merged away, keeping the rest", () => {
+    expect(withoutUnknownTags({ query: "ring", tagIds: ["coop", "gone"] }, tags)).toEqual({ query: "ring", tagIds: ["coop"] });
+  });
+
+  it("drops tagIds entirely when none are left", () => {
+    expect(withoutUnknownTags({ platformId: "pc", tagIds: ["gone"] }, tags)).toEqual({ platformId: "pc" });
+  });
+
+  it("returns the same filter when every Tag still exists, so callers can skip an update", () => {
+    const filter = { tagIds: ["coop", "rpg"] };
+    expect(withoutUnknownTags(filter, tags)).toBe(filter);
+    const none = { query: "x" };
+    expect(withoutUnknownTags(none, tags)).toBe(none);
   });
 });
