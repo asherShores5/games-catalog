@@ -567,6 +567,11 @@ async function deleteAccount(ctx: Ctx, args: { id: string }) {
 // are never written by an Import, except a lone Unknown Copy, which is filled in (planSteamImport).
 
 const IMPORT_CONCURRENCY = 8;
+/**
+ * No step starts later than this into an Import. The Lambda has 25s; a started step is one
+ * transaction (well under a second), so 20s leaves room for the ones in flight.
+ */
+const IMPORT_BUDGET_MS = 20_000;
 
 /** The Platform Steam Copies land on: the owner's "PC", re-created if they deleted it. */
 async function steamPlatform(ctx: Ctx): Promise<Platform> {
@@ -664,6 +669,11 @@ async function importSteam(ctx: Ctx, args: { accountId: string }): Promise<Steam
   // Each step touches a different Game (planSteamImport claims a Game for at most one app), so
   // steps can run side by side without racing each other's `updatedAt` guard.
   await inPool(steps, IMPORT_CONCURRENCY, async (step) => {
+    // Out of time: leave the rest for the next run (counted as failed, which re-running retries).
+    if (Date.now() - started >= IMPORT_BUDGET_MS) {
+      summary.failed++;
+      return;
+    }
     try {
       const tagIds = storeTags.get(step.app.appId);
       const r = await applyStep(ctx, step, env, tagIds);
@@ -735,32 +745,49 @@ async function lookUpStoreTags(ctx: Ctx, steps: ImportStep[], started: number): 
   const recs = await allTagRecs(ctx);
   const known: ImportableTag[] = recs.filter((t) => !t.retiring);
   const dropped = [...(await droppedTagNames(ctx)), ...recs.filter((t) => t.retiring).flatMap((t) => [t.name, ...t.aliases])];
-  const idFor = new Map<string, string | undefined>();
-  const tagIdFor = async (name: string) => {
+  // The Tag list is read once; new Tags are checked against it (and each other) and written together.
+  const created: Tag[] = [];
+  const tagIdFor = (name: string) => {
     const match = matchImportTag(name, known, dropped);
     if ("tagId" in match) return match.tagId;
     if ("skip" in match) return undefined;
+    let clean: string;
     try {
-      const created = await addTag(ctx, { name: match.create });
-      known.push({ ...created, aliases: [] });
-      return created.id;
+      clean = validateTagName(match.create, known);
     } catch (e) {
       // A Tag name the rules refuse: skip that Tag, keep the rest.
       if (!(e instanceof UserError)) throw e;
       return undefined;
     }
+    const tag: Tag = { id: randomUUID(), name: clean };
+    created.push(tag);
+    known.push({ ...tag, aliases: [] });
+    return tag.id;
   };
   const out = new Map<number, string[]>();
   for (const [appId, list] of names) {
     const ids: string[] = [];
     for (const name of list) {
-      if (!idFor.has(name)) idFor.set(name, await tagIdFor(name));
-      const id = idFor.get(name);
+      const id = tagIdFor(name);
       if (id && !ids.includes(id)) ids.push(id);
     }
     out.set(appId, ids);
   }
+  await putNewTags(ctx, created);
   return out;
+}
+
+/** Write brand-new Tag records, up to a transaction's worth per call. */
+async function putNewTags(ctx: Ctx, tags: Tag[]) {
+  for (let i = 0; i < tags.length; i += TRANSACT_MAX) {
+    await ddb.send(
+      new TransactWriteCommand({
+        TransactItems: tags.slice(i, i + TRANSACT_MAX).map((tag) => ({
+          Put: { TableName: TABLE, Item: { PK: ownerPk(ctx), SK: tagSk(tag.id), ...tag }, ConditionExpression: "attribute_not_exists(PK)" },
+        })),
+      }),
+    );
+  }
 }
 
 // ---- Tags --------------------------------------------------------------------

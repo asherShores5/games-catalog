@@ -97,7 +97,7 @@ type SteamImportSummary {
   alreadyPresent: Int!
   "Names of the added Games, in name order."
   addedNames: [String!]!
-  "Library entries that couldn't be saved this time; re-running retries them."
+  "Library entries that couldn't be saved this time (an error, or the Import ran out of time); re-running retries them."
   failed: Int!
   "Games whose Steam store Categories/Genres were read and applied as Tags this time."
   tagged: Int!

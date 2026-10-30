@@ -20,7 +20,7 @@ export interface SteamImportSummary {
   alreadyPresent: number;
   /** Names of the Games that got a new Copy, in name order. */
   addedNames: string[];
-  /** Library entries that couldn't be saved this time (re-running the Import retries them). */
+  /** Library entries that couldn't be saved this time: an error, or the Import ran out of time (re-running retries them). */
   failed: number;
   /** Games whose store Categories/Genres were read and applied as Tags this time. */
   tagged: number;

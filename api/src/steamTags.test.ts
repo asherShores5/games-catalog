@@ -1,3 +1,4 @@
+import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { gameMatches } from "@games/shared";
 import { SteamError } from "./steam";
@@ -130,7 +131,11 @@ describe("Steam Tag Import: re-imports", () => {
 const library = (n: number) => Array.from({ length: n }, (_, i) => ({ appId: i + 1, name: `Game ${String(i + 1).padStart(3, "0")}` }));
 
 describe("Steam Tag Import: being polite to the store", () => {
-  afterEach(() => vi.useRealTimers());
+  const realSend = h.db.send.bind(h.db);
+  afterEach(() => {
+    vi.useRealTimers();
+    h.db.send = realSend;
+  });
 
   it("one failed store lookup doesn't fail the Import; that Game waits for the next one", async () => {
     const steam = await steamAccount();
@@ -182,6 +187,46 @@ describe("Steam Tag Import: being polite to the store", () => {
 
     expect(await importSteam(steam.id)).toMatchObject({ added: 10, tagged: 4, tagsPending: 6 });
     expect(h.steam.detailCalls).toEqual([1, 2, 3, 4]);
+  });
+
+  /** Every table call takes `ms` of (fake) time, or only the ones `which` picks. */
+  function slowTable(ms: number, which: (cmd: unknown) => boolean = () => true) {
+    h.db.send = async (cmd: unknown) => {
+      if (which(cmd)) vi.setSystemTime(Date.now() + ms);
+      return realSend(cmd);
+    };
+    return () => (h.db.send = realSend);
+  }
+
+  it("the whole Import keeps inside the Lambda timeout: Copies not started in time wait for the next run", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const steam = await steamAccount();
+    h.steam.set(STEAM_ID, library(40));
+    const started = Date.now();
+    const restore = slowTable(1000, (cmd) => cmd instanceof TransactWriteCommand);
+
+    const first = await importSteam(steam.id);
+    restore();
+
+    expect(Date.now() - started).toBeLessThan(25_000);
+    expect(first.added).toBeLessThan(40);
+    expect(first.added + first.failed).toBe(40);
+    expect(await importSteam(steam.id)).toMatchObject({ added: 40 - first.added, alreadyPresent: first.added, failed: 0 });
+  });
+
+  it("creating many new store Tags doesn't eat the Import's time", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    const steam = await steamAccount();
+    h.steam.set(STEAM_ID, library(5));
+    for (let app = 1; app <= 5; app++) {
+      h.steam.setDetails(app, { categories: [], genres: Array.from({ length: 8 }, (_, i) => `Genre ${app}-${i}`) });
+    }
+    const started = Date.now();
+    slowTable(1000);
+
+    expect(await importSteam(steam.id)).toMatchObject({ added: 5, failed: 0, tagged: 5, tagsPending: 0 });
+    expect(Date.now() - started).toBeLessThan(20_000);
+    expect((await gameTags())["Game 003"]).toHaveLength(8);
   });
 
   it("Games never looked up go before Games due a refresh", async () => {
