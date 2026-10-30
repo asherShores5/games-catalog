@@ -1,4 +1,6 @@
+import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { beforeEach, describe, expect, it } from "vitest";
+import { TABLE, accountSk, ownerPk } from "./db";
 import { SteamError } from "./steam";
 import { harness } from "./testing/harness";
 
@@ -73,6 +75,39 @@ describe("Import from Steam", () => {
     }
     expect(games[0].steamAppId).toBe(1145360);
     expect(h.steam.calls).toEqual([STEAM_ID]);
+  });
+
+  it("a second Import while one is running is refused, so nothing is added twice", async () => {
+    const steam = await steamAccount();
+    h.steam.set(STEAM_ID, [{ appId: 1145360, name: "Hades" }, { appId: 620, name: "Portal 2" }]);
+
+    const [first, second] = await Promise.allSettled([
+      h.call(h.owner, "importSteam", { accountId: steam.id }),
+      h.call(h.owner, "importSteam", { accountId: steam.id }),
+    ]);
+
+    expect(first).toMatchObject({ status: "fulfilled", value: { added: 2 } });
+    expect(second).toMatchObject({ status: "rejected", reason: expect.objectContaining({ message: expect.stringMatching(/Conflict: .*already running/) }) });
+    expect((await allGames()).map((g: { name: string }) => g.name)).toEqual(["Hades", "Portal 2"]);
+  });
+
+  it("after an Import finishes (or fails), the next one can run", async () => {
+    const steam = await steamAccount();
+    h.steam.set(STEAM_ID, new SteamError("unavailable", "Steam is down"));
+    await expect(h.call(h.owner, "importSteam", { accountId: steam.id })).rejects.toThrow();
+    h.steam.set(STEAM_ID, [{ appId: 620, name: "Portal 2" }]);
+    expect((await h.call(h.owner, "importSteam", { accountId: steam.id })).added).toBe(1);
+    expect((await h.call(h.owner, "importSteam", { accountId: steam.id })).alreadyPresent).toBe(1);
+  });
+
+  it("a lock left by a crashed Import expires", async () => {
+    const steam = await steamAccount();
+    h.steam.set(STEAM_ID, [{ appId: 620, name: "Portal 2" }]);
+    await h.db.send(new UpdateCommand({
+      TableName: TABLE, Key: { PK: ownerPk(h.owner), SK: accountSk(steam.id) },
+      UpdateExpression: "SET importingUntil = :t", ExpressionAttributeValues: { ":t": Date.now() - 1 },
+    }));
+    expect((await h.call(h.owner, "importSteam", { accountId: steam.id })).added).toBe(1);
   });
 
   it("re-running adds nothing and changes nothing; a newly bought game is the only addition", async () => {

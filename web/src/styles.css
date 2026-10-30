@@ -125,7 +125,7 @@ input.search {
 .filter-row { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin-top: 0.5rem; }
 .filter-row select { height: 2.1rem; font-size: 0.9rem; border-radius: 999px; padding-left: 0.85rem; background-color: var(--surface); }
 .filter-row .badge { display: inline-flex; align-items: center; gap: 0.15rem; padding-right: 0.2rem; background: var(--accent-soft); color: var(--accent); }
-.filter-row .badge button.link { padding: 0 0.3rem; font-size: 1rem; line-height: 1; }
+.filter-row .badge button.link { padding: 0; font-size: 1rem; line-height: 1; }
 
 /* ---- lists ---- */
 .games {
@@ -196,7 +196,15 @@ li > div:last-child:not(.detail) { padding: 0.25rem 0.65rem 0.6rem; background: 
 .copies li.empty { background: none; border-style: dashed; }
 .tag-list { list-style: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .tag-list li.badge { display: inline-flex; align-items: center; padding: 0.15rem 0.2rem 0.15rem 0.6rem; font-size: 0.82rem; background: var(--surface); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
-.tag-list li.badge button.link { padding: 0 0.35rem; color: var(--muted); font-size: 1rem; line-height: 1; }
+.tag-list li.badge button.link { padding: 0; color: var(--muted); font-size: 1rem; line-height: 1; }
+/* The × on a chip: small to look at, a full 28px to tap. */
+.filter-row .badge button.link, .tag-list li.badge button.link {
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  border-radius: 999px;
+}
 .tag-list li.empty { color: var(--muted); font-size: 0.9rem; }
 .merge ul { margin: 0; padding-left: 1.2rem; color: var(--muted); font-size: 0.92rem; }
 .merge p { margin: 0; }
