@@ -189,8 +189,7 @@ async function readOnly(page: Page) {
     const row = rows(page).filter({ has: page.locator(".copy-summary", { hasText: "location unknown" }) }).first();
     if (!(await row.count())) return "no Unknown Copies (skipped)";
     await row.locator("button.row").click();
-    await row.getByText("location unknown").waitFor();
-    expect(await row.getByRole("button", { name: "Fill in" }).isVisible(), "no Fill in button");
+    await row.getByRole("button", { name: "Fill in" }).waitFor({ timeout: 5000 });
     await row.locator("button.row").click();
   });
 
