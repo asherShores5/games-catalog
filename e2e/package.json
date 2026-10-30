@@ -5,6 +5,7 @@
   "description": "Playwright QA against the live site. Not a workspace: CI never installs it.",
   "scripts": {
     "login": "tsx login.ts",
+    "logout": "tsx logout.ts",
     "qa": "tsx qa.ts",
     "qa:write": "tsx qa.ts --write",
     "preview": "tsx preview.ts"
