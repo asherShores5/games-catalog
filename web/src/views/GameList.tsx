@@ -35,9 +35,9 @@ export function GameList({ games, filter, names, openId, onToggle, renderDetail,
               )}
             </span>
             <span className="badges">
-              {g.owned && <span className="badge">{g.copies.length === 1 ? "1 Copy" : `${g.copies.length} Copies`}</span>}
-              {g.wishlist && canWishlist(g.copies) && <span className="badge">Wishlist</span>}
-              {g.playStatus && <span className="badge">{g.playStatus}</span>}
+              {g.owned && <span className="badge count">{g.copies.length === 1 ? "1 Copy" : `${g.copies.length} Copies`}</span>}
+              {g.wishlist && canWishlist(g.copies) && <span className="badge wishlist">Wishlist</span>}
+              {g.playStatus && <span className={`badge status ${g.playStatus.toLowerCase()}`}>{g.playStatus}</span>}
               {tagName && g.tags.map((t) => {
                 const n = tagName(t.tagId);
                 return n && <span key={t.tagId} className="badge tag">{n}</span>;

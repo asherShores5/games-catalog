@@ -85,7 +85,7 @@ export function Tags({ tags, onChange, onGamesChanged, onClose }: {
                 <span>
                   <button className="link" disabled={busy} onClick={() => setEditing({ id: t.id, name: t.name })}>Rename</button>
                   <button className="link" disabled={busy || tags.length < 2} onClick={() => setMerging({ id: t.id, intoId: "" })}>Merge</button>
-                  <button className="link" disabled={busy} onClick={() => remove(t)}>Delete</button>
+                  <button className="link danger" disabled={busy} onClick={() => remove(t)}>Delete</button>
                 </span>
               </>
             )}
