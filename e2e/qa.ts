@@ -115,6 +115,16 @@ async function readOnly(page: Page) {
     expect((await rows(page).count()) === total, "clearing search didn't bring every Game back");
   });
 
+  await check(page, "Wishlist Games are hidden by default; All brings them back", async () => {
+    const badges = await page.locator("ul.games > li .badges").allInnerTexts();
+    expect(!badges.some((b) => b.includes("Wishlist")), "a Wishlist Game in the default list");
+    await page.getByLabel("Wishlist or Owned").selectOption("all");
+    const all = await rows(page).count();
+    expect(all >= total, "All shows fewer Games");
+    await clearFilters(page);
+    return `${total} shown, ${all - total} Wishlist hidden`;
+  });
+
   await check(page, "Wishlist filter", async () => {
     await page.getByLabel("Wishlist or Owned").selectOption("wishlist");
     const n = await rows(page).count();

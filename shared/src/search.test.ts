@@ -68,6 +68,16 @@ describe("Wishlist / Owned filter", () => {
   const wished = { name: "Hades II", copies: [], wishlist: true, playStatus: null };
   const neither = { name: "Tetris", copies: [], wishlist: false, playStatus: null };
 
+  it("with no choice, Wishlist Games are left out", () => {
+    expect(gameMatches(owned, {})).toBe(true);
+    expect(gameMatches(neither, {})).toBe(true);
+    expect(gameMatches(wished, {})).toBe(false);
+  });
+
+  it("All brings the Wishlist back in", () => {
+    for (const g of [owned, wished, neither]) expect(gameMatches(g, { ownership: "all" })).toBe(true);
+  });
+
   it("Owned keeps only Games with a Copy", () => {
     expect(gameMatches(owned, { ownership: "owned" })).toBe(true);
     expect(gameMatches(wished, { ownership: "owned" })).toBe(false);
@@ -83,6 +93,7 @@ describe("Wishlist / Owned filter", () => {
   it("a stale Wishlist flag on an owned Game doesn't put it on the Wishlist", () => {
     expect(gameMatches({ ...owned, wishlist: true }, { ownership: "wishlist" })).toBe(false);
     expect(gameMatches({ ...owned, wishlist: true }, { ownership: "owned" })).toBe(true);
+    expect(gameMatches({ ...owned, wishlist: true }, {})).toBe(true);
   });
 });
 
@@ -114,8 +125,9 @@ describe("combined filters", () => {
     expect(names({ platformId: "pc", ownership: "wishlist" })).toEqual([]);
   });
 
-  it("an empty filter keeps the full list", () => {
-    expect(names({})).toEqual(["Hades", "Hades II", "Hollow Knight", "Celeste"]);
+  it("an empty filter keeps everything but the Wishlist; All keeps the full list", () => {
+    expect(names({})).toEqual(["Hades", "Hollow Knight", "Celeste"]);
+    expect(names({ ownership: "all" })).toEqual(["Hades", "Hades II", "Hollow Knight", "Celeste"]);
   });
 });
 

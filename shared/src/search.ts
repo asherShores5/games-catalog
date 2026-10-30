@@ -23,7 +23,10 @@ export interface GameFilter {
   query?: string;
   /** Keep Games with at least one Copy on this Platform. */
   platformId?: string;
-  /** Owned: has a Copy. Wishlist: on the Wishlist and no Copy. */
+  /**
+   * Unset: everything but the Wishlist (the default view). Owned: has a Copy. Wishlist: on the
+   * Wishlist and no Copy. All: everything, Wishlist included.
+   */
   ownership?: Ownership;
   /** Keep Games with exactly this Play status. */
   playStatus?: PlayStatus;
@@ -31,8 +34,8 @@ export interface GameFilter {
   tagIds?: string[];
 }
 
-export type Ownership = "owned" | "wishlist";
-export const OWNERSHIPS: readonly Ownership[] = ["owned", "wishlist"];
+export type Ownership = "owned" | "wishlist" | "all";
+export const OWNERSHIPS: readonly Ownership[] = ["owned", "wishlist", "all"];
 
 /**
  * The filter without Tag ids that aren't in `tags` (deleted or merged away since the URL was
@@ -55,7 +58,9 @@ export function gameMatches(game: FilterableGame, filter: GameFilter): boolean {
   if (!matchesName(game.name, filter.query ?? "")) return false;
   if (filter.platformId && !game.copies.some((c) => c.platformId === filter.platformId)) return false;
   if (filter.ownership === "owned" && !isOwned(game.copies)) return false;
-  if (filter.ownership === "wishlist" && !(game.wishlist && canWishlist(game.copies))) return false;
+  const onWishlist = game.wishlist && canWishlist(game.copies);
+  if (filter.ownership === "wishlist" && !onWishlist) return false;
+  if (!filter.ownership && onWishlist) return false;
   if (filter.playStatus && game.playStatus !== filter.playStatus) return false;
   if (filter.tagIds?.some((id) => !game.tags?.some((t) => t.tagId === id))) return false;
   return true;
