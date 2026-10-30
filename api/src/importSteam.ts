@@ -8,11 +8,11 @@
 import { randomUUID } from "node:crypto";
 import {
   STEAM_PLATFORM, accountLabel, afterCopyAdded, byName, importTags, samePlatformName,
-  type Copy, type Platform, type SteamImportSummary,
+  type Platform, type SteamImportSummary,
 } from "@games/shared";
 import type { Ctx } from "./db";
 import { accountOut, getAccountRec } from "./accounts";
-import { catalog, gameOut, nextUpdatedAt, saveGame, writeCopy, type GameRec, type KnownCopy } from "./games";
+import { catalog, gameOut, newGameRec, nextUpdatedAt, saveGame, writeCopy, type GameRec, type GameWithCopies, type KnownCopy } from "./games";
 import { addPlatform, allPlatforms } from "./platforms";
 import { UserError, validateCopyAccount } from "./rules";
 import { SteamError } from "./steam";
@@ -40,11 +40,18 @@ function steamUserError(e: SteamError): UserError {
 
 type StepOutcome = "added" | "present";
 
+/** What every step of one Import shares: the catalog as read, the Steam Platform and the Account. */
+interface ImportRun {
+  games: Map<string, GameWithCopies>;
+  platform: Platform;
+  accountId: string;
+}
+
 /** Apply one plan step. Returns what it did and the Game it concerns. */
 async function applyStep(
   ctx: Ctx,
   step: ImportStep,
-  env: { games: Map<string, { game: GameRec; copies: Copy[] }>; platform: Platform; accountId: string },
+  run: ImportRun,
   /** Tag ids from the app's store page, when this Import looked it up. */
   storeTagIds?: string[],
 ): Promise<{ outcome: StepOutcome; gameId: string; name: string }> {
@@ -52,18 +59,17 @@ async function applyStep(
   // skips Tags already linked (Manual stays Manual) and Tags I removed from this Game.
   const withStoreTags = (g: GameRec): GameRec =>
     storeTagIds ? { ...g, ...importTags(tagState(g), storeTagIds), storeTagsAt: Date.now() } : g;
-  const newCopy = (): KnownCopy => ({ id: randomUUID(), platformId: env.platform.id, format: "Digital", accountId: env.accountId, createdAt: Date.now() });
+  const newCopy = (): KnownCopy => ({ id: randomUUID(), platformId: run.platform.id, format: "Digital", accountId: run.accountId, createdAt: Date.now() });
   const copyExtra = { steamAppId: step.app.appId };
 
   if (step.kind === "newGame") {
-    const now = Date.now();
-    const next = withStoreTags({ id: randomUUID(), name: step.name, wishlist: false, playStatus: null, steamAppId: step.app.appId, createdAt: now, updatedAt: now });
+    const next = withStoreTags(newGameRec(step.name, { steamAppId: step.app.appId }));
     await writeCopy(ctx, { next, copy: newCopy(), copyExtra });
     return { outcome: "added", gameId: next.id, name: next.name };
   }
 
   // The stored record, so Tags, Tag removals and any other private field survive the rewrite.
-  const { game: read, copies } = env.games.get(step.gameId)!;
+  const { game: read, copies } = run.games.get(step.gameId)!;
   const steamAppId = step.link ? step.app.appId : read.steamAppId;
   if (step.kind === "present") {
     // Nothing to add. A manual Game matched by name still learns its Steam app ID, so later
@@ -76,7 +82,7 @@ async function applyStep(
     // Same write as fillUnknownCopy: the Copy keeps its id (and Edition); Owned, Wishlist and
     // Play status don't change since it was already a Copy.
     const unknown = copies.find((c) => c.id === step.copyId)!;
-    const copy: KnownCopy = { ...unknown, platformId: env.platform.id, format: "Digital", accountId: env.accountId };
+    const copy: KnownCopy = { ...unknown, platformId: run.platform.id, format: "Digital", accountId: run.accountId };
     await writeCopy(ctx, { read, next: withStoreTags({ ...read, steamAppId, updatedAt: nextUpdatedAt(read) }), copy, copyExtra, fill: true });
     return { outcome: "added", gameId: read.id, name: read.name };
   }
@@ -115,9 +121,9 @@ export async function importSteam(ctx: Ctx, args: { accountId: string }): Promis
   const platform = await steamPlatform(ctx);
   const games = await catalog(ctx);
   const steps = planSteamImport(library, games.map((c) => ({ ...gameOut(c.game, c.copies), mergedSteamAppIds: c.game.mergedSteamAppIds })), accountId);
-  const env = { games: new Map(games.map((c) => [c.game.id, c])), platform, accountId };
+  const run: ImportRun = { games: new Map(games.map((c) => [c.game.id, c])), platform, accountId };
 
-  const wanted = storeTagCandidates(steps, env.games);
+  const wanted = storeTagCandidates(steps, run.games);
   const storeTags = await lookUpStoreTags(ctx, wanted, started);
 
   const summary: SteamImportSummary = { added: 0, alreadyPresent: 0, failed: 0, addedNames: [], tagged: 0, tagsPending: 0 };
@@ -131,7 +137,7 @@ export async function importSteam(ctx: Ctx, args: { accountId: string }): Promis
     }
     try {
       const tagIds = storeTags.get(step.app.appId);
-      const r = await applyStep(ctx, step, env, tagIds);
+      const r = await applyStep(ctx, step, run, tagIds);
       if (r.outcome === "added") {
         summary.added++;
         summary.addedNames.push(r.name);

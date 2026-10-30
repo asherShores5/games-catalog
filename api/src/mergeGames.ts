@@ -6,17 +6,16 @@
 // Merge. Each moved Copy is re-keyed from the STORED record (Put under the surviving Game, Delete
 // the old key), so stored-only fields (an Import's `steamAppId`) and the Account move as they
 // are; legacy Digital Copies with no Account aren't re-validated. Redundant Unknown Copies go.
-import { GetCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { planMerge, type MergeSide } from "@games/shared";
-import { TABLE, TRANSACT_MAX, cancellationCodes, copyPrefix, ddb, gameSk, ownerPk, queryPrefix, type Ctx, type Rec } from "./db";
-import { changedMeanwhile, copyOut, gameOut, gameRec, nextUpdatedAt, putGameIfUnchanged, type GameRec } from "./games";
+import { TABLE, TRANSACT_MAX, cancellationCodes, copyPrefix, ddb, gameSk, ownerPk, putNew, queryPrefix, type Ctx, type Rec } from "./db";
+import { changedMeanwhile, copyOut, gameOut, getGameRec, nextUpdatedAt, putGameIfUnchanged, type GameRec } from "./games";
 import { UserError, validatePlayStatus } from "./rules";
 
+/** A Game with its STORED Copy records (stored-only fields included), for moving them. */
 async function loadGameRecords(ctx: Ctx, id: unknown): Promise<{ game: GameRec; copyRecs: Rec[] }> {
-  if (typeof id !== "string" || id.includes("#")) throw new UserError("NotFound", "No such Game");
-  const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: gameSk(id) } }));
-  if (!r.Item) throw new UserError("NotFound", "No such Game");
-  return { game: gameRec(r.Item), copyRecs: await queryPrefix(ctx, copyPrefix(id)) };
+  const game = await getGameRec(ctx, id);
+  return { game, copyRecs: await queryPrefix(ctx, copyPrefix(game.id)) };
 }
 
 const mergeSide = (game: GameRec, copyRecs: Rec[]): MergeSide => ({ ...game, tags: game.tags ?? [], copies: copyRecs.map(copyOut) });
@@ -56,16 +55,7 @@ export async function mergeGames(ctx: Ctx, args: { fromId: string; intoId: strin
     ...from.copyRecs.flatMap((r) =>
       dropped.has(r.id as string)
         ? [del(r.SK)]
-        : [
-            {
-              Put: {
-                TableName: TABLE,
-                Item: { ...r, PK: ownerPk(ctx), SK: copyPrefix(into.game.id) + (r.id as string), gameId: into.game.id },
-                ConditionExpression: "attribute_not_exists(PK)",
-              },
-            },
-            del(r.SK),
-          ],
+        : [putNew(ctx, { ...r, SK: copyPrefix(into.game.id) + (r.id as string), gameId: into.game.id }), del(r.SK)],
     ),
   ];
   if (items.length > TRANSACT_MAX) {

@@ -10,13 +10,13 @@
 import { randomUUID } from "node:crypto";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import { matchImportTag, storeTagNames, type ImportableTag, type Tag } from "@games/shared";
-import { TABLE, TRANSACT_MAX, ddb, ownerPk, tagSk, type Ctx } from "./db";
+import { TRANSACT_MAX, ddb, type Ctx } from "./db";
 import type { GameRec } from "./games";
 import { UserError, validateTagName } from "./rules";
 import { SteamError } from "./steam";
 import { steam } from "./steamClient";
 import type { ImportStep } from "./steamImport";
-import { allTagRecs, droppedTagNames } from "./tags";
+import { allTagRecs, droppedTagNames, putNewTag } from "./tags";
 
 const STORE_TAGS_CAP = 40;
 const STORE_TAGS_BUDGET_MS = 12_000;
@@ -97,9 +97,7 @@ async function putNewTags(ctx: Ctx, tags: Tag[]) {
   for (let i = 0; i < tags.length; i += TRANSACT_MAX) {
     await ddb.send(
       new TransactWriteCommand({
-        TransactItems: tags.slice(i, i + TRANSACT_MAX).map((tag) => ({
-          Put: { TableName: TABLE, Item: { PK: ownerPk(ctx), SK: tagSk(tag.id), ...tag }, ConditionExpression: "attribute_not_exists(PK)" },
-        })),
+        TransactItems: tags.slice(i, i + TRANSACT_MAX).map((tag) => putNewTag(ctx, tag)),
       }),
     );
   }

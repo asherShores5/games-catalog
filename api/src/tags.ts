@@ -1,41 +1,28 @@
 // Tags and Game-Tag links.
 //
-// `SK = TAG#<id>` holds `{ id, name }`: one shared list for manual and imported Tags. Seeded once
-// per owner like Platforms (marker `META#tagsSeeded`).
+// `SK = TAG#<id>` holds `{ id, name }` plus private `aliases` and `retiring`: one shared list for
+// manual and imported Tags. Seeded once per owner like Platforms (marker `META#tagsSeeded`).
+// The links themselves live on each Game record (games.ts `GameRec.tags` / `removedTagIds`).
 import { randomUUID } from "node:crypto";
-import { DeleteCommand, GetCommand, PutCommand, TransactWriteCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, TransactWriteCommand, type TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 import {
   SEED_TAGS, addManualTag, addTagNames, byName, dropTag, mentionsTag, moveTag, removeGameTag as unlinkTag, sameTagName,
   type GameTags, type ImportableTag, type Tag,
 } from "@games/shared";
-import { TABLE, TRANSACT_MAX, cancellationCodes, ddb, isCopyRec, ownerPk, queryPrefix, tagSk, type Ctx, type Rec } from "./db";
-import { changedMeanwhile, gameOut, gameRec, loadGame, nextUpdatedAt, putGameIfUnchanged, saveGame, type GameRec } from "./games";
+import {
+  TABLE, TRANSACT_MAX, cancellationCodes, ddb, deleteRecord, failedAt, getOwned, idAndName, ownerPk, putNew, queryPrefix, seedOnce,
+  setFields, tagSk, type Ctx, type Rec,
+} from "./db";
+import { catalog, changedMeanwhile, gameOut, loadGame, nextUpdatedAt, putGameIfUnchanged, saveGame, type GameRec } from "./games";
 import { UserError, validateTagName } from "./rules";
 
 const TAGS_SEEDED_SK = "META#tagsSeeded";
 
 async function ensureTags(ctx: Ctx) {
-  const marker = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: TAGS_SEEDED_SK } }));
-  if (marker.Item) return;
-  try {
-    await ddb.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          { Put: { TableName: TABLE, Item: { PK: ownerPk(ctx), SK: TAGS_SEEDED_SK, at: Date.now() }, ConditionExpression: "attribute_not_exists(PK)" } },
-          ...SEED_TAGS.map((name) => {
-            const id = randomUUID();
-            return { Put: { TableName: TABLE, Item: { PK: ownerPk(ctx), SK: tagSk(id), id, name } } };
-          }),
-        ],
-      }),
-    );
-  } catch (e) {
-    if ((e as Error).name !== "TransactionCanceledException") throw e;
-  }
-}
-
-function tagOut(rec: Rec): Tag {
-  return { id: rec.id as string, name: rec.name as string };
+  await seedOnce(ctx, TAGS_SEEDED_SK, SEED_TAGS.map((name) => {
+    const id = randomUUID();
+    return { SK: tagSk(id), id, name };
+  }));
 }
 
 /**
@@ -46,25 +33,24 @@ interface TagRec extends ImportableTag {
   retiring: boolean;
 }
 
-function importableTag(rec: Rec): TagRec {
-  return { ...tagOut(rec), aliases: (rec.aliases as string[] | undefined) ?? [], retiring: rec.retiring === true };
+function tagRec(rec: Rec): TagRec {
+  return { ...idAndName(rec), aliases: (rec.aliases as string[] | undefined) ?? [], retiring: rec.retiring === true };
 }
 
 export async function allTagRecs(ctx: Ctx): Promise<TagRec[]> {
   await ensureTags(ctx);
-  return (await queryPrefix(ctx, "TAG#")).map(importableTag);
+  return (await queryPrefix(ctx, "TAG#")).map(tagRec);
 }
 
-async function allTags(ctx: Ctx) {
-  return (await allTagRecs(ctx)).map(({ id, name }): Tag => ({ id, name })).sort(byName);
+/** The owner's Tags in name order (public fields only). */
+export async function allTags(ctx: Ctx): Promise<Tag[]> {
+  await ensureTags(ctx);
+  return (await queryPrefix(ctx, "TAG#")).map(idAndName).sort(byName);
 }
 
 async function getTagRec(ctx: Ctx, id: unknown): Promise<TagRec> {
-  if (typeof id !== "string") throw new UserError("NotFound", "No such Tag");
   await ensureTags(ctx);
-  const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(id) } }));
-  if (!r.Item) throw new UserError("NotFound", "No such Tag");
-  return importableTag(r.Item);
+  return tagRec(await getOwned(ctx, id, tagSk, "Tag"));
 }
 
 // Names of Tags I deleted, one record each (`SK = DROPPED_TAG#<folded name>`), so an Import
@@ -77,28 +63,13 @@ export async function droppedTagNames(ctx: Ctx): Promise<string[]> {
   return (await queryPrefix(ctx, DROPPED_TAG_PREFIX)).map((r) => r.name as string);
 }
 
-export async function tags(ctx: Ctx) {
-  return allTags(ctx);
-}
-
-async function getTag(ctx: Ctx, id: unknown): Promise<Tag> {
-  if (typeof id !== "string") throw new UserError("NotFound", "No such Tag");
-  await ensureTags(ctx);
-  const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(id) } }));
-  if (!r.Item) throw new UserError("NotFound", "No such Tag");
-  return tagOut(r.Item);
-}
+/** The Put for a brand-new Tag record. */
+export const putNewTag = (ctx: Ctx, tag: Tag) => putNew(ctx, { SK: tagSk(tag.id), ...tag });
 
 export async function addTag(ctx: Ctx, args: { name: string }) {
   const name = validateTagName(args.name, await allTags(ctx));
   const tag: Tag = { id: randomUUID(), name };
-  await ddb.send(
-    new PutCommand({
-      TableName: TABLE,
-      Item: { PK: ownerPk(ctx), SK: tagSk(tag.id), ...tag },
-      ConditionExpression: "attribute_not_exists(PK)",
-    }),
-  );
+  await ddb.send(new PutCommand(putNewTag(ctx, tag).Put));
   return tag;
 }
 
@@ -114,16 +85,7 @@ export async function renameTag(ctx: Ctx, args: { id: string; name: string }) {
 /** Rewrite a Tag's name and aliases, only if nobody renamed it since `read`. */
 async function setTagAliases(ctx: Ctx, read: ImportableTag, aliases: string[], name = read.name) {
   try {
-    await ddb.send(
-      new UpdateCommand({
-        TableName: TABLE,
-        Key: { PK: ownerPk(ctx), SK: tagSk(read.id) },
-        UpdateExpression: "SET #n = :n, aliases = :a",
-        ConditionExpression: "attribute_exists(PK) AND #n = :read",
-        ExpressionAttributeNames: { "#n": "name" },
-        ExpressionAttributeValues: { ":n": name, ":a": aliases, ":read": read.name },
-      }),
-    );
+    await setFields(ctx, tagSk(read.id), { name, aliases }, { name: read.name });
   } catch (e) {
     if ((e as Error).name === "ConditionalCheckFailedException") throw new UserError("Conflict", "The Tag changed while saving; reload and try again");
     throw e;
@@ -139,8 +101,8 @@ async function setTagAliases(ctx: Ctx, read: ImportableTag, aliases: string[], n
  * and retried.
  */
 async function rewriteGamesMentioning(ctx: Ctx, tagId: string, change: (g: GameTags) => GameTags) {
-  const recs = (await queryPrefix(ctx, "GAME#")).filter((r) => !isCopyRec(r)).map(gameRec);
-  for (const first of recs.filter((g) => mentionsTag(tagState(g), tagId))) {
+  const games = (await catalog(ctx)).map((c) => c.game);
+  for (const first of games.filter((g) => mentionsTag(tagState(g), tagId))) {
     let game = first;
     for (let attempt = 1; ; attempt++) {
       try {
@@ -153,6 +115,9 @@ async function rewriteGamesMentioning(ctx: Ctx, tagId: string, change: (g: GameT
     }
   }
 }
+
+/** A Tag on its way out (delete or merge): no new links may land on it. Re-running the delete or merge finishes it. */
+const markRetiring = (ctx: Ctx, tagId: string) => setFields(ctx, tagSk(tagId), { retiring: true });
 
 /** I delete a Tag. Its names (current and aliases) are remembered so Imports don't re-create it. */
 export async function deleteTag(ctx: Ctx, args: { id: string }) {
@@ -172,19 +137,6 @@ export async function deleteTag(ctx: Ctx, args: { id: string }) {
   return tag.id;
 }
 
-/** A Tag on its way out (delete or merge): no new links may land on it. Re-running the delete or merge finishes it. */
-async function markRetiring(ctx: Ctx, tagId: string) {
-  await ddb.send(
-    new UpdateCommand({
-      TableName: TABLE,
-      Key: { PK: ownerPk(ctx), SK: tagSk(tagId) },
-      UpdateExpression: "SET retiring = :t",
-      ConditionExpression: "attribute_exists(PK)",
-      ExpressionAttributeValues: { ":t": true },
-    }),
-  );
-}
-
 /**
  * Merge Tag `fromId` into `intoId`: its links move (deduped, Manual winning) and it's deleted.
  * Its name and aliases become aliases of `intoId`, so Imports bringing them land there.
@@ -197,37 +149,36 @@ export async function mergeTags(ctx: Ctx, args: { fromId: string; intoId: string
   await markRetiring(ctx, from.id);
   await setTagAliases(ctx, into, addTagNames(into.aliases, from.name, ...from.aliases));
   await rewriteGamesMentioning(ctx, from.id, (g) => moveTag(g, from.id, into.id));
-  await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(from.id) } }));
+  await deleteRecord(ctx, tagSk(from.id));
   return { id: into.id, name: into.name };
 }
 
 export const tagState = (game: GameRec): GameTags => ({ tags: game.tags ?? [], removedTagIds: game.removedTagIds ?? [] });
 
+/** Positions in addGameTag's transaction. */
+const GAME_TAG_TX = { game: 0, tag: 1 } as const;
+
 /** I add a Tag to a Game: a Manual link (an imported link becomes Manual). */
 export async function addGameTag(ctx: Ctx, args: { gameId: string; tagId: string }) {
   const { game, copies } = await loadGame(ctx, args.gameId);
-  const tag = await getTag(ctx, args.tagId);
+  const tag = await getTagRec(ctx, args.tagId);
   const next: GameRec = { ...game, ...addManualTag(tagState(game), tag.id), updatedAt: nextUpdatedAt(game) };
+  const items: NonNullable<TransactWriteCommandInput["TransactItems"]> = [];
+  items[GAME_TAG_TX.game] = putGameIfUnchanged(ctx, game, next);
+  // The Tag must still exist, and not be on its way out, when the link lands: a delete or merge
+  // may be racing us.
+  items[GAME_TAG_TX.tag] = {
+    ConditionCheck: {
+      TableName: TABLE,
+      Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) },
+      ConditionExpression: "attribute_exists(PK) AND attribute_not_exists(retiring)",
+    },
+  };
   try {
-    await ddb.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          putGameIfUnchanged(ctx, game, next),
-          // The Tag must still exist, and not be on its way out, when the link lands: a delete or
-          // merge may be racing us.
-          {
-            ConditionCheck: {
-              TableName: TABLE,
-              Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) },
-              ConditionExpression: "attribute_exists(PK) AND attribute_not_exists(retiring)",
-            },
-          },
-        ],
-      }),
-    );
+    await ddb.send(new TransactWriteCommand({ TransactItems: items }));
   } catch (e) {
     const codes = cancellationCodes(e);
-    if (codes?.[1] === "ConditionalCheckFailed") throw new UserError("NotFound", "No such Tag");
+    if (failedAt(codes, GAME_TAG_TX.tag)) throw new UserError("NotFound", "No such Tag");
     if (codes) throw changedMeanwhile();
     throw e;
   }

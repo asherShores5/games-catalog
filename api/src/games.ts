@@ -8,19 +8,22 @@
 // Game record conditioned on the `updatedAt` it read, so two racing writes can't both win
 // (e.g. Wishlist set on a Game while a Copy is being added). `updatedAt` always moves forward.
 import { randomUUID } from "node:crypto";
-import { GetCommand, PutCommand, TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
+import { PutCommand, TransactWriteCommand, type TransactWriteCommandInput } from "@aws-sdk/lib-dynamodb";
 import {
   afterCopyAdded, byName, canWishlist, isOwned, isUnknownCopy,
   type Copy, type Format, type Game, type GameTag, type GameTags, type PlayStatus,
 } from "@games/shared";
-import { TABLE, accountSk, cancellationCodes, copyPrefix, ddb, gameSk, isCopyRec, ownerPk, platformSk, queryPrefix, type Ctx, type Rec } from "./db";
+import {
+  TABLE, accountSk, cancellationCodes, copyPrefix, ddb, failedAt, gameSk, getOwned, isCopyRec, ownerPk, platformSk, putNew, queryPrefix,
+  type Ctx, type Rec,
+} from "./db";
 import { getAccount } from "./accounts";
 import { getPlatform } from "./platforms";
 import { UserError, validateCopyAccount, validateEdition, validateFormat, validateGameName, validatePlayStatus } from "./rules";
 
 /**
  * The Game record fields we store. Ticket 01 records lack wishlist/playStatus; they default here.
- * The Game's Tag links (and the Tags I removed) live on this record too (see Tags below). They're
+ * The Game's Tag links (and the Tags I removed) live on this record too (see tags.ts). They're
  * optional so code building a fresh Game needn't mention them; gameRec fills them, so every Game
  * write that starts from a read carries them along.
  */
@@ -39,6 +42,12 @@ export interface GameRec extends Partial<GameTags> {
   updatedAt: number;
 }
 
+/** A stored Game record with its Copies, as read. */
+export interface GameWithCopies {
+  game: GameRec;
+  copies: Copy[];
+}
+
 export function gameRec(rec: Rec): GameRec {
   return {
     id: rec.id as string,
@@ -55,6 +64,12 @@ export function gameRec(rec: Rec): GameRec {
   };
 }
 
+/** A brand-new Game record: not on the Wishlist and no Play status unless `fields` say otherwise. */
+export function newGameRec(name: string, fields: Partial<GameRec> = {}): GameRec {
+  const now = Date.now();
+  return { id: randomUUID(), name, wishlist: false, playStatus: null, createdAt: now, updatedAt: now, ...fields };
+}
+
 export function copyOut(rec: Rec): Copy {
   return {
     id: rec.id as string,
@@ -68,37 +83,47 @@ export function copyOut(rec: Rec): Copy {
   };
 }
 
-/** The Put for a brand-new Copy record of `gameId` (the Seed's Unknown Copies; writeCopy builds the same Put). */
-export function putNewCopy(ctx: Ctx, gameId: string, copy: Copy) {
-  return {
-    Put: {
-      TableName: TABLE,
-      Item: { PK: ownerPk(ctx), SK: copyPrefix(gameId) + copy.id, gameId, ...copy },
-      ConditionExpression: "attribute_not_exists(PK)",
-    },
-  };
-}
+/** A Copy record of `gameId`. `extra` holds stored-only fields (an Import's `steamAppId`). */
+const copyItem = (gameId: string, copy: Copy, extra?: Rec) => ({ SK: copyPrefix(gameId) + copy.id, gameId, ...extra, ...copy });
+
+/** The Put for a brand-new Copy record of `gameId` (the Seed's Unknown Copies). */
+export const putNewCopy = (ctx: Ctx, gameId: string, copy: Copy) => putNew(ctx, copyItem(gameId, copy));
 
 /** A Copy whose Platform and Format are known (anything but an Unknown Copy). */
 export type KnownCopy = Copy & { platformId: string; format: Format };
+
+/** Where a Copy is, as a caller gives it (addCopy, fillUnknownCopy). */
+export interface CopyInput {
+  platformId: string;
+  format: string;
+  accountId?: string | null;
+  edition?: string | null;
+}
 
 const oldestFirst = (a: Copy, b: Copy) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1);
 
 export function gameOut(game: GameRec, copies: Copy[]): Game {
   const sorted = [...copies].sort(oldestFirst);
-  const { removedTagIds: _private, mergedSteamAppIds: _alsoPrivate, storeTagsAt: _stillPrivate, ...pub } = game;
+  // Private fields never leave the API.
+  const { removedTagIds: _removedTagIds, mergedSteamAppIds: _mergedSteamAppIds, storeTagsAt: _storeTagsAt, ...pub } = game;
   return { ...pub, tags: game.tags ?? [], copies: sorted, owned: isOwned(sorted) };
 }
 
 /** Next `updatedAt`: now, but always later than the last write (it doubles as a version). */
 export const nextUpdatedAt = (game: GameRec) => Math.max(Date.now(), game.updatedAt + 1);
 
+/** The Game record as stored (no playStatus attribute for "none"). */
+const gameItem = (ctx: Ctx, game: GameRec) => ({ PK: ownerPk(ctx), SK: gameSk(game.id), ...game, playStatus: game.playStatus ?? undefined });
+
+/** The Put for a brand-new Game record. */
+export const putNewGame = (ctx: Ctx, game: GameRec) => putNew(ctx, gameItem(ctx, game));
+
 /** Write the Game record only if nobody changed it since we read it. */
 export function putGameIfUnchanged(ctx: Ctx, read: GameRec, next: GameRec) {
   return {
     Put: {
       TableName: TABLE,
-      Item: { PK: ownerPk(ctx), SK: gameSk(next.id), ...next, playStatus: next.playStatus ?? undefined },
+      Item: gameItem(ctx, next),
       ConditionExpression: "updatedAt = :read",
       ExpressionAttributeValues: { ":read": read.updatedAt },
     },
@@ -107,11 +132,15 @@ export function putGameIfUnchanged(ctx: Ctx, read: GameRec, next: GameRec) {
 
 export const changedMeanwhile = () => new UserError("Conflict", "The Game changed while saving; reload and try again");
 
-export async function loadGame(ctx: Ctx, id: unknown): Promise<{ game: GameRec; copies: Copy[] }> {
-  if (typeof id !== "string" || id.includes("#")) throw new UserError("NotFound", "No such Game");
-  const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: gameSk(id) } }));
-  if (!r.Item) throw new UserError("NotFound", "No such Game");
-  return { game: gameRec(r.Item), copies: (await queryPrefix(ctx, copyPrefix(id))).map(copyOut) };
+/** The stored Game record. Ids containing "#" can't be Game ids (they'd reach other keys). */
+export async function getGameRec(ctx: Ctx, id: unknown): Promise<GameRec> {
+  if (typeof id === "string" && id.includes("#")) throw new UserError("NotFound", "No such Game");
+  return gameRec(await getOwned(ctx, id, gameSk, "Game"));
+}
+
+export async function loadGame(ctx: Ctx, id: unknown): Promise<GameWithCopies> {
+  const game = await getGameRec(ctx, id);
+  return { game, copies: (await queryPrefix(ctx, copyPrefix(game.id))).map(copyOut) };
 }
 
 /** Every Game with its Copies, in name order. */
@@ -120,7 +149,7 @@ export async function allGames(ctx: Ctx): Promise<Game[]> {
 }
 
 /** Every Game record (private fields included, for writes) with its Copies. One query. */
-export async function catalog(ctx: Ctx): Promise<{ game: GameRec; copies: Copy[] }[]> {
+export async function catalog(ctx: Ctx): Promise<GameWithCopies[]> {
   const recs = await queryPrefix(ctx, "GAME#");
   const copies = new Map<string, Copy[]>();
   for (const rec of recs.filter(isCopyRec)) {
@@ -131,43 +160,36 @@ export async function catalog(ctx: Ctx): Promise<{ game: GameRec; copies: Copy[]
   return recs.filter((r) => !isCopyRec(r)).map((r) => ({ game: gameRec(r), copies: copies.get(r.id as string) ?? [] }));
 }
 
-
-// ---- resolvers ---------------------------------------------------------------
-
-export async function games(ctx: Ctx) {
-  return allGames(ctx);
-}
-
 export async function addGame(ctx: Ctx, args: { name: string }) {
-  const name = validateGameName(args.name);
-  const now = Date.now();
-  const game: GameRec = { id: randomUUID(), name, wishlist: false, playStatus: null, createdAt: now, updatedAt: now };
-  await ddb.send(
-    new PutCommand({
-      TableName: TABLE,
-      Item: { PK: ownerPk(ctx), SK: gameSk(game.id), ...game, playStatus: undefined },
-      ConditionExpression: "attribute_not_exists(PK)",
-    }),
-  );
+  const game = newGameRec(validateGameName(args.name));
+  await ddb.send(new PutCommand(putNewGame(ctx, game).Put));
   return gameOut(game, []);
 }
 
-export async function addCopy(
-  ctx: Ctx,
-  args: { gameId: string; platformId: string; format: string; accountId?: string | null; edition?: string | null },
-) {
-  const format = validateFormat(args.format);
-  const accountId = validateCopyAccount(format, args.accountId);
-  const edition = validateEdition(args.edition);
-  const { game, copies } = await loadGame(ctx, args.gameId);
-  const platform = await getPlatform(ctx, args.platformId);
-  const account = accountId === undefined ? undefined : await getAccount(ctx, accountId);
+/** A CopyInput's rule checks (rules.ts), before anything is read. */
+function validateCopyInput(input: CopyInput) {
+  const format = validateFormat(input.format);
+  return { format, accountId: validateCopyAccount(format, input.accountId), edition: validateEdition(input.edition) };
+}
 
-  const copy: KnownCopy = { id: randomUUID(), platformId: platform.id, format, accountId: account?.id, edition, createdAt: Date.now() };
+/** The Platform and Account a valid CopyInput names, read (NotFound if either is gone). */
+async function copyPlace(ctx: Ctx, input: CopyInput, valid: ReturnType<typeof validateCopyInput>) {
+  const platform = await getPlatform(ctx, input.platformId);
+  const account = valid.accountId === undefined ? undefined : await getAccount(ctx, valid.accountId);
+  return { platformId: platform.id, format: valid.format, accountId: account?.id };
+}
+
+export async function addCopy(ctx: Ctx, args: CopyInput & { gameId: string }) {
+  const valid = validateCopyInput(args);
+  const { game, copies } = await loadGame(ctx, args.gameId);
+  const copy: KnownCopy = { id: randomUUID(), ...(await copyPlace(ctx, args, valid)), edition: valid.edition, createdAt: Date.now() };
   const next: GameRec = { ...game, ...afterCopyAdded(game), updatedAt: nextUpdatedAt(game) };
   await writeCopy(ctx, { read: game, next, copy });
   return gameOut(next, [...copies, copy]);
 }
+
+/** Positions in writeCopy's transaction, for reading which condition failed. */
+const COPY_TX = { game: 0, copy: 1, platform: 2, account: 3 } as const;
 
 /**
  * Write a Copy and its Game in one transaction: the Game record is rewritten only if unchanged
@@ -184,36 +206,19 @@ export async function writeCopy(
   const mustExist = (SK: string) => ({
     ConditionCheck: { TableName: TABLE, Key: { PK: ownerPk(ctx), SK }, ConditionExpression: "attribute_exists(PK)" },
   });
-  const gameWrite = read
-    ? putGameIfUnchanged(ctx, read, next)
-    : {
-        Put: {
-          TableName: TABLE,
-          Item: { PK: ownerPk(ctx), SK: gameSk(next.id), ...next, playStatus: next.playStatus ?? undefined },
-          ConditionExpression: "attribute_not_exists(PK)",
-        },
-      };
+  const copyPut = putNew(ctx, copyItem(next.id, copy, w.copyExtra));
+  if (w.fill) copyPut.Put.ConditionExpression = "attribute_exists(PK)";
+  const items: NonNullable<TransactWriteCommandInput["TransactItems"]> = [];
+  items[COPY_TX.game] = read ? putGameIfUnchanged(ctx, read, next) : putNewGame(ctx, next);
+  items[COPY_TX.copy] = copyPut;
+  items[COPY_TX.platform] = mustExist(platformSk(copy.platformId));
+  if (copy.accountId) items[COPY_TX.account] = mustExist(accountSk(copy.accountId));
   try {
-    await ddb.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          gameWrite,
-          {
-            Put: {
-              TableName: TABLE,
-              Item: { PK: ownerPk(ctx), SK: copyPrefix(next.id) + copy.id, gameId: next.id, ...w.copyExtra, ...copy },
-              ConditionExpression: w.fill ? "attribute_exists(PK)" : "attribute_not_exists(PK)",
-            },
-          },
-          mustExist(platformSk(copy.platformId)),
-          ...(copy.accountId ? [mustExist(accountSk(copy.accountId))] : []),
-        ],
-      }),
-    );
+    await ddb.send(new TransactWriteCommand({ TransactItems: items }));
   } catch (e) {
     const codes = cancellationCodes(e);
-    if (codes?.[2] === "ConditionalCheckFailed") throw new UserError("NotFound", "No such Platform");
-    if (codes?.[3] === "ConditionalCheckFailed") throw new UserError("NotFound", "No such Account");
+    if (failedAt(codes, COPY_TX.platform)) throw new UserError("NotFound", "No such Platform");
+    if (failedAt(codes, COPY_TX.account)) throw new UserError("NotFound", "No such Account");
     if (codes) throw changedMeanwhile();
     throw e;
   }
@@ -221,26 +226,18 @@ export async function writeCopy(
 
 /**
  * Give an Unknown Copy its Platform and Format (and Account if Digital), keeping its id. The same
- * rules as addCopy (validateCopyAccount, Platform/Account must exist, at index 2/3 of the
- * transaction); Owned, Wishlist and Play status don't change since it was already a Copy.
+ * rules and checks as addCopy; Owned, Wishlist and Play status don't change since it was already
+ * a Copy.
  */
-export async function fillUnknownCopy(
-  ctx: Ctx,
-  args: { gameId: string; copyId: string; platformId: string; format: string; accountId?: string | null; edition?: string | null },
-) {
-  const format = validateFormat(args.format);
-  const accountId = validateCopyAccount(format, args.accountId);
-  const edition = validateEdition(args.edition);
+export async function fillUnknownCopy(ctx: Ctx, args: CopyInput & { gameId: string; copyId: string }) {
+  const valid = validateCopyInput(args);
   const { game, copies } = await loadGame(ctx, args.gameId);
   const unknown = copies.find((c) => c.id === args.copyId);
   if (!unknown) throw new UserError("NotFound", "No such Copy on this Game");
   if (!isUnknownCopy(unknown)) {
     throw new UserError("ValidationError", "That Copy's location is already known; remove it and add a new Copy instead");
   }
-  const platform = await getPlatform(ctx, args.platformId);
-  const account = accountId === undefined ? undefined : await getAccount(ctx, accountId);
-
-  const copy: KnownCopy = { ...unknown, platformId: platform.id, format, accountId: account?.id, edition: edition ?? unknown.edition };
+  const copy: KnownCopy = { ...unknown, ...(await copyPlace(ctx, args, valid)), edition: valid.edition ?? unknown.edition };
   const next: GameRec = { ...game, updatedAt: nextUpdatedAt(game) };
   await writeCopy(ctx, { read: game, next, copy, fill: true });
   return gameOut(next, copies.map((c) => (c.id === copy.id ? copy : c)));

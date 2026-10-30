@@ -7,8 +7,8 @@
 import { randomUUID } from "node:crypto";
 import { TransactWriteCommand } from "@aws-sdk/lib-dynamodb";
 import type { Copy } from "@games/shared";
-import { TABLE, gameSk, ddb, ownerPk, type Ctx } from "./db";
-import { allGames, putNewCopy, type GameRec } from "./games";
+import { ddb, type Ctx } from "./db";
+import { allGames, newGameRec, putNewCopy, putNewGame } from "./games";
 import { UserError } from "./rules";
 import { parseSeedRows, seedKey, seedState } from "./seed";
 
@@ -34,22 +34,10 @@ export async function seedGames(userId: string, raw: unknown, opts: { dryRun?: b
     if (opts.dryRun) continue;
 
     const { wishlist, playStatus, unknownCopy } = seedState(row.status);
-    const now = Date.now();
-    const game: GameRec = { id: randomUUID(), name: row.name, wishlist, playStatus, createdAt: now, updatedAt: now };
-    const copy: Copy | undefined = unknownCopy ? { id: randomUUID(), createdAt: now } : undefined;
+    const game = newGameRec(row.name, { wishlist, playStatus });
+    const copy: Copy | undefined = unknownCopy ? { id: randomUUID(), createdAt: game.createdAt } : undefined;
     await ddb.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          {
-            Put: {
-              TableName: TABLE,
-              Item: { PK: ownerPk(ctx), SK: gameSk(game.id), ...game, playStatus: game.playStatus ?? undefined },
-              ConditionExpression: "attribute_not_exists(PK)",
-            },
-          },
-          ...(copy ? [putNewCopy(ctx, game.id, copy)] : []),
-        ],
-      }),
+      new TransactWriteCommand({ TransactItems: [putNewGame(ctx, game), ...(copy ? [putNewCopy(ctx, game.id, copy)] : [])] }),
     );
   }
   return result;

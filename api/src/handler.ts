@@ -3,13 +3,13 @@
 // seedGames.ts); db.ts holds the table, keys and the caller's partition.
 import type { AppSyncIdentityCognito, AppSyncResolverEvent } from "aws-lambda";
 import type { Ctx } from "./db";
-import { addAccount, accounts, deleteAccount, renameAccount, setSteamId } from "./accounts";
-import { addCopy, addGame, fillUnknownCopy, games, removeCopy, setPlayStatus, setWishlist } from "./games";
+import { addAccount, allAccounts, deleteAccount, renameAccount, setSteamId } from "./accounts";
+import { addCopy, addGame, allGames, fillUnknownCopy, removeCopy, setPlayStatus, setWishlist } from "./games";
 import { importSteam } from "./importSteam";
 import { mergeGames } from "./mergeGames";
-import { addPlatform, deletePlatform, platforms, renamePlatform } from "./platforms";
+import { addPlatform, allPlatforms, deletePlatform, renamePlatform } from "./platforms";
 import { UserError } from "./rules";
-import { addGameTag, addTag, deleteTag, mergeTags, removeGameTag, renameTag, tags } from "./tags";
+import { addGameTag, addTag, allTags, deleteTag, mergeTags, removeGameTag, renameTag } from "./tags";
 
 // Test seams and the Seed script's entry point, re-exported so callers keep one import path.
 export { setDocClient } from "./db";
@@ -17,10 +17,10 @@ export { setSteamLibrary } from "./steamClient";
 export { seedGames, type SeedResult } from "./seedGames";
 
 const RESOLVERS: Record<string, (ctx: Ctx, args: any) => Promise<unknown>> = {
-  games, addGame, addCopy, fillUnknownCopy, removeCopy, setPlayStatus, setWishlist,
-  platforms, addPlatform, renamePlatform, deletePlatform,
-  accounts, addAccount, renameAccount, deleteAccount, setSteamId, importSteam,
-  tags, addTag, renameTag, deleteTag, mergeTags, addGameTag, removeGameTag,
+  games: allGames, addGame, addCopy, fillUnknownCopy, removeCopy, setPlayStatus, setWishlist,
+  platforms: allPlatforms, addPlatform, renamePlatform, deletePlatform,
+  accounts: allAccounts, addAccount, renameAccount, deleteAccount, setSteamId, importSteam,
+  tags: allTags, addTag, renameTag, deleteTag, mergeTags, addGameTag, removeGameTag,
   mergeGames,
 };
 
