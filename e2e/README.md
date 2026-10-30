@@ -12,7 +12,8 @@ npm run qa:write            # plus add/edit/merge/delete of QA-… Games, Platfo
 
 The session (Cognito tokens, not the password) is saved to `~/.config/games-qa/state.json`
 with 600 permissions, outside the repo. It lasts as long as the refresh token (30 days of not
-opening it); each run saves the rotated token. Delete the file to sign Playwright out.
+opening it); each run saves the rotated token. `npm run logout` revokes it with Cognito and
+deletes the file; do that when you're done testing for a while.
 
 The write run names everything `QA-<run id>-…` and finishes with a sweep that deletes any
 `QA-…` Game, Platform, Account or Tag, including leftovers from a run that crashed. It never

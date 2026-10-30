@@ -100,6 +100,12 @@ export class AppStack extends Stack {
       },
       // No verbose content: an erroring field would otherwise log its arguments (e.g. a Steam ID).
       logConfig: { fieldLogLevel: appsync.FieldLogLevel.ERROR, excludeVerboseContent: true, retention: logs.RetentionDays.TWO_WEEKS },
+      // The app knows its schema; nobody else needs it described. Every app request is one root
+      // field at most 3 levels deep (games > copies > id), so these caps never bite the app and
+      // stop deep or batched queries from fanning out into many Lambda calls.
+      introspectionConfig: appsync.IntrospectionConfig.DISABLED,
+      queryDepthLimit: 4,
+      resolverCountLimit: 2,
     });
     this.userPool = userPool;
     this.client = client;
