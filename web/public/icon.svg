@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#14161a"/>
+  <!-- game controller (same shapes as the PNG icons) -->
+  <g fill="#5b8def">
+    <rect x="96" y="180" width="320" height="150" rx="70"/>
+    <circle cx="150" cy="330" r="62"/>
+    <circle cx="362" cy="330" r="62"/>
+  </g>
+  <g fill="#14161a">
+    <rect x="146" y="245" width="80" height="20" rx="6"/>
+    <rect x="176" y="215" width="20" height="80" rx="6"/>
+    <circle cx="338" cy="236" r="15"/>
+    <circle cx="372" cy="270" r="15"/>
+  </g>
+</svg>

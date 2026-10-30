@@ -10,9 +10,9 @@
 
 **Platform**: The hardware a Copy runs on (PC, PS5, Switch…). An editable list. Not a Tag.
 
-**Store**: Where Digital Copies are bought (Steam, Epic, PSN…).
+**Store**: Where Digital Copies are bought: Steam, Epic, GOG, PSN, Xbox, Nintendo or Other. A fixed list, not editable.
 
-**Account**: One login on a Store, with a nickname, e.g. "Steam: main". Physical Copies have no Account.
+**Account**: One login on a Store, with a nickname, e.g. "Steam: main". Every Digital Copy names one; Physical Copies have none. The Store is fixed once created; the nickname can be renamed.
 
 **Owned**: A Game with at least one Copy. Never set by hand.
 
@@ -24,8 +24,14 @@
 
 **Tag**: A descriptor of a Game (co-op, single-player, versus, narrative, open-world, platformer…). One shared list, whether a Tag came from an Import or was added by hand.
 
-**Tag source**: Whether a Game's Tag came from an Import or from Asher. Manual choices beat Imports.
+**Tag source**: Whether a Game's Tag came from an Import or from Asher: Import or Manual. Manual choices beat Imports.
+
+**Manual**: The Tag source of a Tag Asher put on a Game by hand (the other value is Import). Adding by hand a Tag an Import brought makes it Manual; an Import never downgrades or removes a Manual Tag.
 
 **Import**: Pulling a Store Account's library (and its Tags) into the catalog. Only adds; never removes manual Copies or Tags.
 
+**Steam ID**: The 17-digit SteamID64 a Steam Account's Import reads. Private Account data: stored on the Account, never shown back, never in the repo.
+
 **Seed**: The one-time load of the Notion "Gaming catalog" page.
+
+**Merge**: Folding one Game into another that is really the same title. Copies and Tags combine, the other Game is deleted, and its Steam app ID still matches the kept Game in later Imports. An Unknown Copy is dropped once the other Game shows where the title is.
