@@ -7,7 +7,8 @@ import {
   aws_lambda as lambda,
   aws_lambda_nodejs as nodejs,
   aws_logs as logs,
-  aws_secretsmanager as secretsmanager,
+  aws_budgets as budgets,
+  aws_iam as iam,
 } from "aws-cdk-lib";
 import type { Construct } from "constructs";
 
@@ -15,10 +16,12 @@ import type { Construct } from "constructs";
 export const APP_DOMAIN = "games.ashershores.com";
 const ROOT = path.join(__dirname, "..", "..");
 /**
- * The Steam Web API key (plain SecretString). Created by hand, never by CDK, so the key value is
- * in no template or repo (docs/first-deploy.md). Only its name is here.
+ * The Steam Web API key (SSM SecureString under the AWS-managed aws/ssm key). Created by hand,
+ * never by CDK, so the key value is in no template or repo (docs/first-deploy.md). Only its name
+ * is here.
  */
-export const STEAM_KEY_SECRET_NAME = "games-catalog/steam-web-api-key";
+export const STEAM_KEY_PARAM_NAME = "/games-catalog/steam-web-api-key";
+const BUDGET_EMAIL = "asher.shores5@gmail.com";
 
 /** Data, auth and API. Hosting: CertStack/WebStack (lib/hosting.ts). Deploy CI: CiStack (lib/ci.ts). */
 export class AppStack extends Stack {
@@ -77,13 +80,17 @@ export class AppStack extends Stack {
       memorySize: 256,
       // A Steam Import writes one transaction per game; AppSync waits at most 30 s for a resolver.
       timeout: Duration.seconds(25),
-      environment: { TABLE_NAME: table.tableName, STEAM_KEY_SECRET_NAME },
+      environment: { TABLE_NAME: table.tableName, STEAM_KEY_PARAM_NAME },
       bundling: { minify: true, sourceMap: true, format: nodejs.OutputFormat.ESM, target: "node22" },
       logGroup: new logs.LogGroup(this, "ApiLogs", { retention: logs.RetentionDays.TWO_WEEKS, removalPolicy: RemovalPolicy.DESTROY }),
     });
     table.grantReadWriteData(fn);
-    // Read access to the one Steam key secret, nothing else in Secrets Manager.
-    secretsmanager.Secret.fromSecretNameV2(this, "SteamKey", STEAM_KEY_SECRET_NAME).grantRead(fn);
+    // Read access to the one Steam key parameter. SSM decrypts aws/ssm SecureStrings for any
+    // principal allowed GetParameter, so no kms:Decrypt statement is needed.
+    fn.addToRolePolicy(new iam.PolicyStatement({
+      actions: ["ssm:GetParameter"],
+      resources: [this.formatArn({ service: "ssm", resource: "parameter", resourceName: STEAM_KEY_PARAM_NAME.slice(1) })],
+    }));
 
     const api = new appsync.GraphqlApi(this, "Api", {
       name: "games-catalog",
@@ -108,6 +115,27 @@ export class AppStack extends Stack {
     ds.createResolver("MmergeGames", { typeName: "Mutation", fieldName: "mergeGames" });
 
     // The web app's /config.json takes these values (see web/public/config.example.json).
+    // ---- cost guardrail: everything here is tagged app=games-catalog (bin/app.ts) ----
+    new budgets.CfnBudget(this, "Budget", {
+      budget: {
+        budgetName: "games-catalog-monthly",
+        budgetType: "COST",
+        timeUnit: "MONTHLY",
+        budgetLimit: { amount: 1, unit: "USD" },
+        costFilters: { TagKeyValue: ["user:app$games-catalog"] },
+      },
+      notificationsWithSubscribers: [
+        {
+          notification: { notificationType: "ACTUAL", comparisonOperator: "GREATER_THAN", threshold: 80 },
+          subscribers: [{ subscriptionType: "EMAIL", address: BUDGET_EMAIL }],
+        },
+        {
+          notification: { notificationType: "FORECASTED", comparisonOperator: "GREATER_THAN", threshold: 100 },
+          subscribers: [{ subscriptionType: "EMAIL", address: BUDGET_EMAIL }],
+        },
+      ],
+    });
+
     new CfnOutput(this, "Region", { value: this.region });
     new CfnOutput(this, "UserPoolId", { value: userPool.userPoolId });
     new CfnOutput(this, "ClientId", { value: client.userPoolClientId });

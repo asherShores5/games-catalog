@@ -1,8 +1,8 @@
 // The real Steam client: the Steam Web API's IPlayerService/GetOwnedGames, with the API key read
-// from Secrets Manager. The key and the Steam ID go into the request URL (Steam's documented way)
+// from an SSM SecureString. The key and the Steam ID go into the request URL (Steam's documented way)
 // and nowhere else: no logging here, and every error is a fixed-message SteamError, so neither
 // can reach a log line or a client through an exception.
-import { GetSecretValueCommand, SecretsManagerClient } from "@aws-sdk/client-secrets-manager";
+import { GetParameterCommand, SSMClient } from "@aws-sdk/client-ssm";
 import { SteamError, type SteamLibrary, type SteamOwnedGame } from "./steam";
 
 const OWNED_GAMES_URL = "https://api.steampowered.com/IPlayerService/GetOwnedGames/v1/";
@@ -106,25 +106,26 @@ export function steamWebApi(deps: SteamWebApiDeps): SteamLibrary {
   };
 }
 
-type SecretsClient = Pick<SecretsManagerClient, "send">;
+type ParamClient = Pick<SSMClient, "send">;
 
 /**
- * Reads the key from the named secret (a plain SecretString holding just the key), once per
- * Lambda container. A missing name, missing secret or empty value all mean "not set up". The
- * Lambda's role can read this one secret only (infra/lib/stacks.ts).
+ * Reads the key from the named SecureString parameter (just the key), once per Lambda container.
+ * A missing name, missing parameter or empty value all mean "not set up". The Lambda's role can
+ * read this one parameter only (infra/lib/stacks.ts). SSM rather than Secrets Manager: standard
+ * parameters are free, a secret is $0.40 a month, and nothing here needs rotation.
  */
-export function secretsManagerKey(secretName: string | undefined, client?: SecretsClient): () => Promise<string | undefined> {
+export function ssmKey(paramName: string | undefined, client?: ParamClient): () => Promise<string | undefined> {
   let cached: string | undefined;
   return async () => {
     if (cached) return cached;
-    if (!secretName) return undefined;
-    const sm = client ?? new SecretsManagerClient({});
+    if (!paramName) return undefined;
+    const ssm = client ?? new SSMClient({});
     try {
-      const r = await sm.send(new GetSecretValueCommand({ SecretId: secretName }));
-      cached = r.SecretString?.trim() || undefined;
+      const r = await ssm.send(new GetParameterCommand({ Name: paramName, WithDecryption: true }));
+      cached = r.Parameter?.Value?.trim() || undefined;
       return cached;
     } catch (e) {
-      if ((e as Error).name === "ResourceNotFoundException") return undefined;
+      if ((e as Error).name === "ParameterNotFound") return undefined;
       throw e;
     }
   };

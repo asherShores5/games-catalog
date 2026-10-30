@@ -107,27 +107,35 @@ Push `main` first (tests only), then fast-forward `prod` to it. The `prod` push 
 and then `npm run deploy` as the deploy role. The role trusts only this repo's `prod` branch and
 can only assume the CDK bootstrap roles.
 
-## 9. Steam Web API key (for "Import from Steam")
+## 9. Steam Web API key (for "Import from Steam", optional)
 
-The API Lambda reads the key from one Secrets Manager secret, `games-catalog/steam-web-api-key`,
-in the app's region (us-west-1). CDK never creates it, so the key is in no template, log or file
-here. Until it exists, an Import fails with "The Steam Web API key isn't set up yet".
+Only Import from Steam needs this; everything else works without it. The API Lambda reads the
+key from one SSM SecureString parameter, `/games-catalog/steam-web-api-key`, in the app's region
+(us-west-1). CDK never creates it, so the key is in no template, log or file here. Until it
+exists, an Import fails with "The Steam Web API key isn't set up yet". SSM rather than Secrets
+Manager because a standard parameter is free and a secret is $0.40 a month.
 
-Get a key at https://steamcommunity.com/dev/apikey (signed in to Steam), then store it as a plain
-string. `read -s` keeps it out of the shell history and the screen; a temp file keeps it out of
+Get the key:
+
+1. Sign in at https://steamcommunity.com/dev/apikey with the Steam account that owns the games.
+   Steam only issues keys to accounts that have spent at least $5 and have Steam Guard on.
+2. Domain Name: `games.ashershores.com` (Steam just records it; nothing checks it).
+3. Agree to the terms and Register. Copy the 32-character key it shows. Treat it like a
+   password; Revoke on the same page if it ever leaks, then register a new one.
+
+Store it. `read -s` keeps it out of the shell history and the screen; a temp file keeps it out of
 the process list:
 
 ```sh
-read -rs -p "Steam Web API key: " STEAM_KEY; echo
+read -rs "STEAM_KEY?Steam Web API key: "; echo          # zsh; in bash: read -rs -p "...: " STEAM_KEY
 KEYFILE=$(mktemp) && chmod 600 "$KEYFILE" && printf '%s' "$STEAM_KEY" > "$KEYFILE"
-aws secretsmanager create-secret --region us-west-1 --name games-catalog/steam-web-api-key \
-  --secret-string "file://$KEYFILE"
+aws ssm put-parameter --profile personal --region us-west-1 --type SecureString \
+  --name /games-catalog/steam-web-api-key --value "file://$KEYFILE"
 rm -f "$KEYFILE"; unset STEAM_KEY
 ```
 
-To replace the key later, use `put-secret-value --secret-id games-catalog/steam-web-api-key` the
-same way. A warm Lambda keeps the old key until it restarts (minutes to hours); redeploying
-forces it.
+To replace the key later, run the same with `--overwrite`. A warm Lambda keeps the old key until
+it restarts (minutes to hours); redeploying forces it.
 
 Then in the app: Accounts > a Steam Account > Set Steam ID (the 17-digit number from your Steam
 profile URL or Account details, starting 7656119), and in Steam's privacy settings set Game
