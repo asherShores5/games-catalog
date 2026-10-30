@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { TAG_NAME_MAX, byName, cleanTagName, type Tag } from "@games/shared";
 import { addTag, deleteTag, mergeTags, renameTag } from "../api";
+import { ListScreen, NameForm, useBusy } from "./ListScreen";
 
 /**
  * The shared Tag list: add, rename, merge one into another, delete (removes it from every Game).
@@ -15,42 +16,20 @@ export function Tags({ tags, onChange, onGamesChanged, onClose }: {
   const [name, setName] = useState("");
   const [editing, setEditing] = useState<{ id: string; name: string }>();
   const [merging, setMerging] = useState<{ id: string; intoId: string }>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const { busy, error, run } = useBusy();
 
-  async function run(action: () => Promise<void>) {
-    setBusy(true);
-    setError(undefined);
-    try {
-      await action();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const add = (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = cleanTagName(name);
-    if (!clean) return;
+  const add = (clean: string) =>
     void run(async () => {
       onChange([...tags, await addTag(clean)].sort(byName));
       setName("");
     });
-  };
 
-  const saveRename = (e: React.FormEvent) => {
-    e.preventDefault();
-    const target = editing;
-    const clean = target && cleanTagName(target.name);
-    if (!target || !clean) return;
+  const rename = (id: string, clean: string) =>
     void run(async () => {
-      const renamed = await renameTag(target.id, clean);
+      const renamed = await renameTag(id, clean);
       onChange(tags.map((t) => (t.id === renamed.id ? renamed : t)).sort(byName));
       setEditing(undefined);
     });
-  };
 
   const saveMerge = (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,25 +53,22 @@ export function Tags({ tags, onChange, onGamesChanged, onClose }: {
   };
 
   return (
-    <main>
-      <header>
-        <h1>Tags</h1>
-        <button className="link" onClick={onClose}>Back to Games</button>
-      </header>
-      <form className="add" onSubmit={add}>
-        <input placeholder="Add a Tag" value={name} onChange={(e) => setName(e.target.value)} maxLength={TAG_NAME_MAX} />
-        <button className="primary" disabled={busy || !cleanTagName(name)}>Add</button>
-      </form>
-      {error && <p className="error">{error}</p>}
+    <ListScreen
+      title="Tags"
+      onClose={onClose}
+      error={error}
+      addForm={
+        <NameForm value={name} onValueChange={setName} clean={cleanTagName} maxLength={TAG_NAME_MAX} busy={busy}
+          submitLabel="Add" placeholder="Add a Tag" onSubmit={add} />
+      }
+    >
       <ul className="games">
         {tags.map((t) => (
           <li key={t.id} className="row">
             {editing?.id === t.id ? (
-              <form className="add" onSubmit={saveRename}>
-                <input value={editing.name} onChange={(e) => setEditing({ id: t.id, name: e.target.value })} maxLength={TAG_NAME_MAX} autoFocus />
-                <button className="primary" disabled={busy || !cleanTagName(editing.name)}>Save</button>
-                <button type="button" className="link" onClick={() => setEditing(undefined)}>Cancel</button>
-              </form>
+              <NameForm value={editing.name} onValueChange={(v) => setEditing({ id: t.id, name: v })} clean={cleanTagName}
+                maxLength={TAG_NAME_MAX} busy={busy} submitLabel="Save" onSubmit={(clean) => rename(t.id, clean)}
+                onCancel={() => setEditing(undefined)} />
             ) : merging?.id === t.id ? (
               <form className="add" onSubmit={saveMerge}>
                 <span>Merge “{t.name}” into</span>
@@ -116,6 +92,6 @@ export function Tags({ tags, onChange, onGamesChanged, onClose }: {
           </li>
         ))}
       </ul>
-    </main>
+    </ListScreen>
   );
 }

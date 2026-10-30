@@ -9,7 +9,8 @@ export type ImportableGame = Game & { mergedSteamAppIds?: number[] };
 /** What happens to one library entry. Every step names the Steam app it came from. */
 export type ImportStep =
   /** The target Game already has a Copy on this Account (imported earlier, or added by hand). */
-  | { kind: "present"; app: SteamOwnedGame; gameId: string; link: boolean }
+  /** `repeat`: an earlier app in this library already claimed the Game (a merged Game), so this step must not write it. */
+  | { kind: "present"; app: SteamOwnedGame; gameId: string; link: boolean; repeat?: true }
   /** A Game whose only Copy is an Unknown Copy (from the Seed): that Copy becomes the Steam Copy. */
   | { kind: "fillUnknown"; app: SteamOwnedGame; gameId: string; copyId: string; link: boolean }
   /** An existing Game gets a Digital Copy on this Account. */
@@ -64,7 +65,7 @@ export function planSteamImport(library: SteamOwnedGame[], games: ImportableGame
     const again = claimed.has(game.id);
     claimed.add(game.id);
     if (again || game.copies.some((c) => c.accountId === accountId)) {
-      steps.push({ kind: "present", app, gameId: game.id, link });
+      steps.push({ kind: "present", app, gameId: game.id, link, ...(again ? { repeat: true as const } : {}) });
     } else if (game.copies.length === 1 && isUnknownCopy(game.copies[0])) {
       steps.push({ kind: "fillUnknown", app, gameId: game.id, copyId: game.copies[0].id, link });
     } else {

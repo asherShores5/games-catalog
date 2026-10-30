@@ -34,6 +34,19 @@ export interface GameFilter {
 export type Ownership = "owned" | "wishlist";
 export const OWNERSHIPS: readonly Ownership[] = ["owned", "wishlist"];
 
+/**
+ * The filter without Tag ids that aren't in `tags` (deleted or merged away since the URL was
+ * made), so a stale link doesn't show "Unknown Tag" and zero results. Returns `filter` itself
+ * when nothing changes.
+ */
+export function withoutUnknownTags(filter: GameFilter, tags: readonly { id: string }[]): GameFilter {
+  if (!filter.tagIds?.length) return filter;
+  const kept = filter.tagIds.filter((id) => tags.some((t) => t.id === id));
+  if (kept.length === filter.tagIds.length) return filter;
+  const { tagIds: _dropped, ...rest } = filter;
+  return kept.length ? { ...rest, tagIds: kept } : rest;
+}
+
 /** The parts of a Game the list filter looks at. Missing `tags` reads as none. */
 export type FilterableGame = Pick<Game, "name" | "copies" | "wishlist" | "playStatus"> & Partial<Pick<Game, "tags">>;
 

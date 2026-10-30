@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { PutCommand } from "@aws-sdk/lib-dynamodb";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ConditionalCheckFailedException } from "./testing/fakeDynamo";
 import { harness } from "./testing/harness";
 
 const h = harness();
@@ -180,5 +182,64 @@ describe("Tags on a Game", () => {
     const game = await h.call(h.owner, "addGame", { name: "Hades" });
     const theirs = (await h.call(h.stranger, "tags"))[0];
     await expect(h.call(h.owner, "addGameTag", { gameId: game.id, tagId: theirs.id })).rejects.toThrow("NotFound");
+  });
+});
+
+describe("Tag delete and merge when a Game can't be rewritten", () => {
+  const realSend = h.db.send.bind(h.db);
+  afterEach(() => {
+    h.db.send = realSend;
+  });
+
+  /** Every write to this Game fails as if it kept changing under us, until `heal()`. */
+  function keepChanging(gameId: string) {
+    h.db.send = async (cmd: unknown) => {
+      if (cmd instanceof PutCommand && cmd.input.Item?.SK === "GAME#" + gameId) {
+        throw new ConditionalCheckFailedException("put condition failed");
+      }
+      return realSend(cmd);
+    };
+    return { heal: () => (h.db.send = realSend) };
+  }
+
+  it("a delete that can't rewrite a Game fails and leaves the Tag, so no Game points at a missing Tag; retrying finishes it", async () => {
+    const a = await h.call(h.owner, "addGame", { name: "Portal 2" });
+    const coop = await tagId("co-op");
+    await h.call(h.owner, "addGameTag", { gameId: a.id, tagId: coop });
+    const fault = keepChanging(a.id);
+
+    await expect(h.call(h.owner, "deleteTag", { id: coop })).rejects.toThrow("Conflict");
+    expect(names(await h.call(h.owner, "tags"))).toContain("co-op");
+
+    fault.heal();
+    await h.call(h.owner, "deleteTag", { id: coop });
+    expect(names(await h.call(h.owner, "tags"))).not.toContain("co-op");
+    expect((await h.call(h.owner, "games"))[0].tags).toEqual([]);
+  });
+
+  it("a merge that can't rewrite a Game fails and leaves both Tags; retrying finishes it", async () => {
+    const a = await h.call(h.owner, "addGame", { name: "Portal 2" });
+    const coop = await tagId("co-op");
+    const coop2 = (await h.call(h.owner, "addTag", { name: "Co-operative" })).id;
+    await h.call(h.owner, "addGameTag", { gameId: a.id, tagId: coop2 });
+    const fault = keepChanging(a.id);
+
+    await expect(h.call(h.owner, "mergeTags", { fromId: coop2, intoId: coop })).rejects.toThrow("Conflict");
+    expect(names(await h.call(h.owner, "tags"))).toContain("Co-operative");
+
+    fault.heal();
+    await h.call(h.owner, "mergeTags", { fromId: coop2, intoId: coop });
+    expect((await h.call(h.owner, "games"))[0].tags).toEqual([{ tagId: coop, source: "Manual" }]);
+  });
+
+  it("while a delete is unfinished, the Tag can't be put on another Game", async () => {
+    const a = await h.call(h.owner, "addGame", { name: "Portal 2" });
+    const b = await h.call(h.owner, "addGame", { name: "Hades" });
+    const coop = await tagId("co-op");
+    await h.call(h.owner, "addGameTag", { gameId: a.id, tagId: coop });
+    keepChanging(a.id);
+    await expect(h.call(h.owner, "deleteTag", { id: coop })).rejects.toThrow("Conflict");
+
+    await expect(h.call(h.owner, "addGameTag", { gameId: b.id, tagId: coop })).rejects.toThrow("NotFound");
   });
 });

@@ -3,9 +3,9 @@
 import {
   ACCOUNT_NICKNAME_MAX, EDITION_MAX, FORMATS, GAME_NAME_MAX, PLATFORM_NAME_MAX, PLAY_STATUSES, STORES,
   accountLabel, cleanAccountNickname, cleanSteamId, needsAccount, cleanEdition, cleanGameName, cleanPlatformName, sameAccount, samePlatformName,
-  type Account, type Format, type Platform, type PlayStatus, type Store,
+  type Account, type Format, type PlayStatus, type Store,
 } from "@games/shared";
-import { TAG_NAME_MAX, cleanTagName, sameTagName, type Tag } from "@games/shared";
+import { TAG_NAME_MAX, cleanTagName, sameTagName } from "@games/shared";
 
 /** An error the caller caused. The client sees "<type>: <message>"; anything else is InternalError. */
 export class UserError extends Error {
@@ -20,23 +20,30 @@ export function validateGameName(raw: unknown): string {
   return name;
 }
 
-/** A new or renamed Platform name: valid, and not another Platform's name (case-insensitive). */
-export function validatePlatformName(raw: unknown, existing: Platform[], selfId?: string): string {
-  const name = cleanPlatformName(raw);
-  if (name === undefined) throw new UserError("ValidationError", `Platform name must be 1-${PLATFORM_NAME_MAX} characters`);
-  const clash = existing.find((p) => p.id !== selfId && samePlatformName(p.name, name));
-  if (clash) throw new UserError("ValidationError", `There is already a Platform called "${clash.name}"`);
-  return name;
+/**
+ * The rule for a new or renamed name in an editable list (Platforms, Tags): valid, and not
+ * another entry's name (`same` decides which names read as one). `selfId` is the entry being renamed.
+ */
+function uniqueName(
+  what: string,
+  max: number,
+  clean: (raw: unknown) => string | undefined,
+  same: (a: string, b: string) => boolean,
+) {
+  return (raw: unknown, existing: readonly { id: string; name: string }[], selfId?: string): string => {
+    const name = clean(raw);
+    if (name === undefined) throw new UserError("ValidationError", `${what} name must be 1-${max} characters`);
+    const clash = existing.find((x) => x.id !== selfId && same(x.name, name));
+    if (clash) throw new UserError("ValidationError", `There is already a ${what} called "${clash.name}"`);
+    return name;
+  };
 }
 
+/** A new or renamed Platform name: valid, and not another Platform's name (case-insensitive). */
+export const validatePlatformName = uniqueName("Platform", PLATFORM_NAME_MAX, cleanPlatformName, samePlatformName);
+
 /** A new or renamed Tag name: valid, and not another Tag's name (case- and accent-insensitive). */
-export function validateTagName(raw: unknown, existing: Tag[], selfId?: string): string {
-  const name = cleanTagName(raw);
-  if (name === undefined) throw new UserError("ValidationError", `Tag name must be 1-${TAG_NAME_MAX} characters`);
-  const clash = existing.find((t) => t.id !== selfId && sameTagName(t.name, name));
-  if (clash) throw new UserError("ValidationError", `There is already a Tag called "${clash.name}"`);
-  return name;
-}
+export const validateTagName = uniqueName("Tag", TAG_NAME_MAX, cleanTagName, sameTagName);
 
 export function validateFormat(raw: unknown): Format {
   if (!FORMATS.includes(raw as Format)) throw new UserError("ValidationError", `Format must be ${FORMATS.join(" or ")}`);
