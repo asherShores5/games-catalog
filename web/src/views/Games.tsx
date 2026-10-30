@@ -91,12 +91,12 @@ export function Games() {
     <main>
       <header>
         <h1>Games</h1>
-        <span>
+        <nav>
           <button className="link" onClick={() => setShowPlatforms(true)}>Platforms</button>
           <button className="link" onClick={() => setShowAccounts(true)}>Accounts</button>
           <button className="link" onClick={() => setShowTags(true)}>Tags</button>
           <button className="link" onClick={() => void signOut()}>Sign out</button>
-        </span>
+        </nav>
       </header>
       <form className="add" onSubmit={submit}>
         <input placeholder="Add a Game" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} />

@@ -79,7 +79,7 @@ export function GameDetail({ game, platforms, accounts, onChange }: {
                 {c.edition && ` · ${c.edition}`}
               </span>
             )}
-            <button className="link" disabled={busy} onClick={() => void run(() => removeCopy(game.id, c.id))}>Remove</button>
+            <button className="link danger" disabled={busy} onClick={() => void run(() => removeCopy(game.id, c.id))}>Remove</button>
           </li>
         ))}
         {game.copies.length === 0 && <li className="empty">No Copies: not Owned.</li>}

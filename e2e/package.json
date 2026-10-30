@@ -6,7 +6,8 @@
   "scripts": {
     "login": "tsx login.ts",
     "qa": "tsx qa.ts",
-    "qa:write": "tsx qa.ts --write"
+    "qa:write": "tsx qa.ts --write",
+    "preview": "tsx preview.ts"
   },
   "devDependencies": {
     "playwright": "1.64.1",
