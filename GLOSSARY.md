@@ -24,7 +24,9 @@
 
 **Tag**: A descriptor of a Game (co-op, single-player, versus, narrative, open-world, platformer…). One shared list, whether a Tag came from an Import or was added by hand.
 
-**Tag source**: Whether a Game's Tag came from an Import or from Asher. Manual choices beat Imports.
+**Tag source**: Whether a Game's Tag came from an Import or from Asher: Import or Manual. Manual choices beat Imports.
+
+**Manual**: The Tag source of a Tag Asher put on a Game by hand (the other value is Import). Adding by hand a Tag an Import brought makes it Manual; an Import never downgrades or removes a Manual Tag.
 
 **Import**: Pulling a Store Account's library (and its Tags) into the catalog. Only adds; never removes manual Copies or Tags.
 

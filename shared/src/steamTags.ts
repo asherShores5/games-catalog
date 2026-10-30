@@ -56,14 +56,16 @@ export const STEAM_TAG_MAP: Readonly<Record<string, string>> = {
 /**
  * Store Categories that describe the Steam store or client, not the game. They'd flood the Tag
  * list without helping me pick what to play, so an Import skips them. Everything else Steam
- * sends (Multi-player, MMO, VR Only, every Genre…) becomes a Tag as-is.
+ * sends (Multi-player, MMO, VR Only, every Genre…) becomes a Tag as-is. "Full controller support"
+ * and "Remote Play Together" are deliberately NOT here (Asher's decision): couch play with a pad,
+ * or co-op over Remote Play, is a real reason to pick a game.
  */
 export const STEAM_IGNORED_CATEGORIES: readonly string[] = [
   "Steam Achievements", "Steam Trading Cards", "Steam Cloud", "Steam Leaderboards", "Steam Workshop",
   "Steam Turn Notifications", "Steam Timeline", "Steam is learning about this game", "SteamVR Collectibles",
-  "Steam China Workshop", "Stats", "Full controller support", "Partial Controller Support",
+  "Steam China Workshop", "Stats", "Partial Controller Support",
   "Tracked Controller Support", "Family Sharing", "In-App Purchases", "Downloadable Content",
-  "Remote Play on Phone", "Remote Play on Tablet", "Remote Play on TV", "Remote Play Together",
+  "Remote Play on Phone", "Remote Play on Tablet", "Remote Play on TV",
   "Valve Anti-Cheat enabled", "Includes Source SDK", "Captions available", "Commentary available",
   "HDR available", "Profile Features Limited", "Additional High-Quality Audio",
   // Steam's accessibility features.
