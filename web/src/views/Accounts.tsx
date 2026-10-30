@@ -4,6 +4,7 @@ import {
   type Account, type SteamImportSummary, type Store,
 } from "@games/shared";
 import { addAccount, deleteAccount, importSteam, renameAccount, setSteamId } from "../api";
+import { ListScreen, NameForm, useBusy } from "./ListScreen";
 
 /**
  * The Account list: add (Store + nickname), rename the nickname, delete (an Account in use can't
@@ -22,42 +23,20 @@ export function Accounts({ accounts, onChange, onImported, onClose }: {
   // The typed Steam ID lives only in this form state; it is sent once and never shown again.
   const [steamIdFor, setSteamIdFor] = useState<{ id: string; steamId: string }>();
   const [imported, setImported] = useState<{ id: string; summary: SteamImportSummary }>();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string>();
+  const { busy, error, run } = useBusy();
 
-  async function run(action: () => Promise<void>) {
-    setBusy(true);
-    setError(undefined);
-    try {
-      await action();
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const add = (e: React.FormEvent) => {
-    e.preventDefault();
-    const clean = cleanAccountNickname(nickname);
-    if (!clean) return;
+  const add = (clean: string) =>
     void run(async () => {
       onChange([...accounts, await addAccount(store, clean)].sort(byAccountLabel));
       setNickname("");
     });
-  };
 
-  const saveRename = (e: React.FormEvent) => {
-    e.preventDefault();
-    const target = editing;
-    const clean = target && cleanAccountNickname(target.nickname);
-    if (!target || !clean) return;
+  const rename = (id: string, clean: string) =>
     void run(async () => {
-      const renamed = await renameAccount(target.id, clean);
+      const renamed = await renameAccount(id, clean);
       onChange(accounts.map((a) => (a.id === renamed.id ? renamed : a)).sort(byAccountLabel));
       setEditing(undefined);
     });
-  };
 
   const saveSteamId = (e: React.FormEvent) => {
     e.preventDefault();
@@ -85,37 +64,46 @@ export function Accounts({ accounts, onChange, onImported, onClose }: {
     });
 
   return (
-    <main>
-      <header>
-        <h1>Accounts</h1>
-        <button className="link" onClick={onClose}>Back to Games</button>
-      </header>
-      <form className="add" onSubmit={add}>
-        <select value={store} onChange={(e) => setStore(e.target.value as Store)} aria-label="Store">
-          {STORES.map((s) => (
-            <option key={s}>{s}</option>
-          ))}
-        </select>
-        <input placeholder="Nickname, e.g. main" value={nickname} onChange={(e) => setNickname(e.target.value)} maxLength={ACCOUNT_NICKNAME_MAX} />
-        <button className="primary" disabled={busy || !cleanAccountNickname(nickname)}>Add</button>
-      </form>
-      {error && <p className="error">{error}</p>}
+    <ListScreen
+      title="Accounts"
+      onClose={onClose}
+      error={error}
+      addForm={
+        <NameForm
+          value={nickname}
+          onValueChange={setNickname}
+          clean={cleanAccountNickname}
+          maxLength={ACCOUNT_NICKNAME_MAX}
+          busy={busy}
+          submitLabel="Add"
+          placeholder="Nickname, e.g. main"
+          onSubmit={add}
+          prefix={
+            <select value={store} onChange={(e) => setStore(e.target.value as Store)} aria-label="Store">
+              {STORES.map((s) => (
+                <option key={s}>{s}</option>
+              ))}
+            </select>
+          }
+        />
+      }
+    >
       {accounts.length === 0 && <p className="empty">No Accounts yet. Digital Copies need one.</p>}
       <ul className="games">
         {accounts.map((a) => (
           <li key={a.id} className="row">
             {editing?.id === a.id ? (
-              <form className="add" onSubmit={saveRename}>
-                <span>{a.store}:</span>
-                <input
-                  value={editing.nickname}
-                  onChange={(e) => setEditing({ id: a.id, nickname: e.target.value })}
-                  maxLength={ACCOUNT_NICKNAME_MAX}
-                  autoFocus
-                />
-                <button className="primary" disabled={busy || !cleanAccountNickname(editing.nickname)}>Save</button>
-                <button type="button" className="link" onClick={() => setEditing(undefined)}>Cancel</button>
-              </form>
+              <NameForm
+                value={editing.nickname}
+                onValueChange={(v) => setEditing({ id: a.id, nickname: v })}
+                clean={cleanAccountNickname}
+                maxLength={ACCOUNT_NICKNAME_MAX}
+                busy={busy}
+                submitLabel="Save"
+                onSubmit={(clean) => rename(a.id, clean)}
+                onCancel={() => setEditing(undefined)}
+                prefix={<span>{a.store}:</span>}
+              />
             ) : steamIdFor?.id === a.id ? (
               <form className="add" onSubmit={saveSteamId}>
                 <input
@@ -155,7 +143,7 @@ export function Accounts({ accounts, onChange, onImported, onClose }: {
           </li>
         ))}
       </ul>
-    </main>
+    </ListScreen>
   );
 }
 
