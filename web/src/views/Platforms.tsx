@@ -54,7 +54,7 @@ export function Platforms({ platforms, onChange, onClose }: {
                 <span>{p.name}</span>
                 <span>
                   <button className="link" disabled={busy} onClick={() => setEditing({ id: p.id, name: p.name })}>Rename</button>
-                  <button className="link" disabled={busy} onClick={() => remove(p)}>Delete</button>
+                  <button className="link danger" disabled={busy} onClick={() => remove(p)}>Delete</button>
                 </span>
               </>
             )}

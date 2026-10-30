@@ -136,7 +136,7 @@ export function Accounts({ accounts, onChange, onImported, onClose }: {
                     </>
                   )}
                   <button className="link" disabled={busy} onClick={() => setEditing({ id: a.id, nickname: a.nickname })}>Rename</button>
-                  <button className="link" disabled={busy} onClick={() => remove(a)}>Delete</button>
+                  <button className="link danger" disabled={busy} onClick={() => remove(a)}>Delete</button>
                 </span>
               </>
             )}
