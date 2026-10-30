@@ -51,7 +51,7 @@ async function openSignedIn(browser: Browser, label: string, options: Parameters
   const page = await context.newPage();
   watch(page, label);
   await page.goto(SITE);
-  const heading = page.getByRole("heading", { name: "Games" });
+  const heading = page.getByRole("heading", { name: "Games", exact: true });
   const login = page.getByPlaceholder("Password");
   await Promise.race([heading.waitFor({ timeout: 20_000 }), login.waitFor({ timeout: 20_000 })]);
   if (await login.isVisible()) throw new Error("Session expired: run `npm run login` (or games-qa-login) again");
@@ -189,8 +189,7 @@ async function readOnly(page: Page) {
     const row = rows(page).filter({ has: page.locator(".copy-summary", { hasText: "location unknown" }) }).first();
     if (!(await row.count())) return "no Unknown Copies (skipped)";
     await row.locator("button.row").click();
-    await row.getByText("location unknown").waitFor();
-    expect(await row.getByRole("button", { name: "Fill in" }).isVisible(), "no Fill in button");
+    await row.getByRole("button", { name: "Fill in" }).waitFor({ timeout: 5000 });
     await row.locator("button.row").click();
   });
 
@@ -201,7 +200,7 @@ async function readOnly(page: Page) {
       const n = await page.locator("ul.games > li").count();
       await snap(page, `05-${screen.toLowerCase()}`);
       await page.getByRole("button", { name: "Back to Games" }).click();
-      await page.getByRole("heading", { name: "Games" }).waitFor();
+      await page.getByRole("heading", { name: "Games", exact: true }).waitFor();
       return `${n} rows`;
     });
   }
@@ -248,7 +247,7 @@ async function goTo(page: Page, screen: string) {
 }
 const back = async (page: Page) => {
   await page.getByRole("button", { name: "Back to Games" }).click();
-  await page.getByRole("heading", { name: "Games" }).waitFor();
+  await page.getByRole("heading", { name: "Games", exact: true }).waitFor();
 };
 const listRow = (page: Page, name: string) => page.locator("ul.games > li.row").filter({ has: page.getByText(name, { exact: true }) });
 const noError = async (page: Page) => {

@@ -27,10 +27,12 @@ try {
   await page.getByPlaceholder("Username").fill(username);
   await page.getByPlaceholder("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
-  const signedIn = page.getByRole("heading", { name: "Games" });
+  const signedIn = page.getByRole("heading", { name: "Games", exact: true });
   const failed = page.locator(".login .error");
   await Promise.race([signedIn.waitFor({ timeout: 20_000 }), failed.waitFor({ timeout: 20_000 })]);
   if (await failed.isVisible()) throw new Error(`Sign-in failed: ${await failed.innerText()}`);
+  const saved = await page.evaluate(() => localStorage.getItem("games.tokens") !== null);
+  if (!saved) throw new Error("Signed-in screen showed but no tokens were stored; nothing saved");
   ensureStateDir();
   await page.context().storageState({ path: STATE_FILE });
   lockDown();

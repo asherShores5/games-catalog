@@ -10,7 +10,8 @@ import {
   STEAM_PLATFORM, accountLabel, afterCopyAdded, byName, importTags, samePlatformName,
   type Platform, type SteamImportSummary,
 } from "@games/shared";
-import type { Ctx } from "./db";
+import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { TABLE, accountSk, ddb, ownerPk, type Ctx } from "./db";
 import { accountOut, getAccountRec } from "./accounts";
 import { catalog, gameOut, newGameRec, nextUpdatedAt, saveGame, writeCopy, type GameRec, type GameWithCopies, type KnownCopy } from "./games";
 import { addPlatform, allPlatforms } from "./platforms";
@@ -27,6 +28,40 @@ const IMPORT_CONCURRENCY = 8;
  * transaction (well under a second), so 20s leaves room for the ones in flight.
  */
 const IMPORT_BUDGET_MS = 20_000;
+/** How long an Import holds its Account's lock: past the Lambda's 25 s timeout, so a crash frees it. */
+const IMPORT_LOCK_MS = 30_000;
+
+/**
+ * One Import per Account at a time. Two at once (a double tap, or two devices) would both plan
+ * against the same catalog and both add each new game. Returns the release function.
+ */
+async function lockAccount(ctx: Ctx, accountId: string): Promise<() => Promise<void>> {
+  const now = Date.now();
+  const until = now + IMPORT_LOCK_MS;
+  const Key = { PK: ownerPk(ctx), SK: accountSk(accountId) };
+  try {
+    await ddb.send(new UpdateCommand({
+      TableName: TABLE, Key,
+      UpdateExpression: "SET importingUntil = :until",
+      // AND binds tighter than OR.
+      ConditionExpression: "attribute_exists(PK) AND attribute_not_exists(importingUntil) OR attribute_exists(PK) AND importingUntil < :now",
+      ExpressionAttributeValues: { ":until": until, ":now": now },
+    }));
+  } catch (e) {
+    if ((e as Error).name === "ConditionalCheckFailedException") {
+      throw new UserError("Conflict", "An Import is already running for this Account; wait for it to finish");
+    }
+    throw e;
+  }
+  return async () => {
+    await ddb.send(new UpdateCommand({
+      TableName: TABLE, Key,
+      UpdateExpression: "REMOVE importingUntil",
+      ConditionExpression: "importingUntil = :until",
+      ExpressionAttributeValues: { ":until": until },
+    })).catch(() => undefined); // already expired and taken over: leave the newer lock alone
+  };
+}
 
 /** The Platform Steam Copies land on: the owner's "PC", re-created if they deleted it. */
 async function steamPlatform(ctx: Ctx): Promise<Platform> {
@@ -109,6 +144,16 @@ export async function importSteam(ctx: Ctx, args: { accountId: string }): Promis
   if (typeof steamId !== "string") throw new UserError("ValidationError", `Set a Steam ID on "${accountLabel(account)}" first`);
   // Same rule every Digital Copy goes through (rules.ts); the Account itself is checked in writeCopy.
   const accountId = validateCopyAccount("Digital", account.id)!;
+
+  const unlock = await lockAccount(ctx, accountId);
+  try {
+    return await runImport(ctx, steamId, accountId, started);
+  } finally {
+    await unlock();
+  }
+}
+
+async function runImport(ctx: Ctx, steamId: string, accountId: string, started: number): Promise<SteamImportSummary> {
 
   let library;
   try {
