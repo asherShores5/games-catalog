@@ -1,6 +1,6 @@
 // QA against the live site, signed in with the session login.ts saved.
 //   npm run qa          read-only: nothing is saved
-//   npm run qa:write    also adds, renames, merges and deletes QA-… Platforms, Tags and Accounts,
+//   npm run qa:write    also adds, renames, merges and deletes QA-… Games, Platforms, Tags and Accounts,
 //                       then sweeps any QA-… rows left behind. Real records are never touched.
 // Screenshots go to e2e/out/ (gitignored). Exit code 1 if any check fails.
 import { existsSync, mkdirSync } from "node:fs";
@@ -17,6 +17,8 @@ const run = `${QA}${Date.now().toString(36)}`;
 type Result = { name: string; ok: boolean; detail?: string };
 const results: Result[] = [];
 const problems: string[] = [];
+/** GraphQL errors a check provokes on purpose. */
+const expectedErrors: string[] = [];
 let shot = 0;
 
 async function check(page: Page, name: string, fn: () => Promise<string | void>) {
@@ -42,7 +44,7 @@ function watch(page: Page, label: string) {
     if (!r.url().includes("appsync-api")) return;
     if (r.status() >= 400) return void problems.push(`${label} GraphQL HTTP ${r.status()}`);
     const body = await r.json().catch(() => undefined);
-    for (const err of body?.errors ?? []) problems.push(`${label} GraphQL error: ${String(err.message).slice(0, 200)}`);
+    for (const err of body?.errors ?? []) if (!expectedErrors.some((x) => String(err.message).includes(x))) problems.push(`${label} GraphQL error: ${String(err.message).slice(0, 200)}`);
   });
 }
 
@@ -155,6 +157,19 @@ async function readOnly(page: Page) {
     return `${badges.length} Games`;
   });
 
+  await check(page, "Missing info filters", async () => {
+    const counts: string[] = [];
+    for (const v of ["location", "tags", "any"]) {
+      await page.getByLabel("Missing info").selectOption(v);
+      counts.push(`${v} ${await rows(page).count()}`);
+    }
+    const unknown = await page.locator("ul.games > li .copy-summary", { hasText: "location unknown" }).count();
+    await page.getByLabel("Missing info").selectOption("location");
+    expect((await rows(page).count()) === (await page.locator("ul.games > li .copy-summary", { hasText: "location unknown" }).count()), "No location shows a Game with a known location");
+    await clearFilters(page);
+    return counts.join(", ") + (unknown ? "" : "");
+  });
+
   await check(page, "Play status filter: Playing", async () => {
     await page.getByLabel("Play status").selectOption("Playing");
     const badges = await page.locator("ul.games > li .badges").allInnerTexts();
@@ -186,11 +201,14 @@ async function readOnly(page: Page) {
   });
 
   await check(page, "an Unknown Copy shows 'location unknown' with Fill in", async () => {
-    const row = rows(page).filter({ has: page.locator(".copy-summary", { hasText: "location unknown" }) }).first();
-    if (!(await row.count())) return "no Unknown Copies (skipped)";
+    const withUnknown = rows(page).filter({ has: page.locator(".copy-summary", { hasText: "location unknown" }) }).first();
+    if (!(await withUnknown.count())) return "no Unknown Copies (skipped)";
+    const name = (await withUnknown.locator("button.row > span:first-child").evaluate((s) => s.childNodes[0]?.textContent ?? "")).trim();
+    const row = rows(page).filter({ has: page.locator("button.row > span:first-child", { hasText: name }) }).first();
     await row.locator("button.row").click();
     await row.getByRole("button", { name: "Fill in" }).waitFor({ timeout: 5000 });
     await row.locator("button.row").click();
+    return name;
   });
 
   for (const screen of ["Platforms", "Accounts", "Tags"]) {
@@ -242,6 +260,7 @@ async function mobile(browser: Browser) {
 
 // ---------------------------------------------------------------------------------------------
 async function goTo(page: Page, screen: string) {
+  await home(page);
   await page.getByRole("button", { name: screen, exact: true }).click();
   await page.getByRole("heading", { name: screen }).waitFor();
 }
@@ -249,7 +268,15 @@ const back = async (page: Page) => {
   await page.getByRole("button", { name: "Back to Games" }).click();
   await page.getByRole("heading", { name: "Games", exact: true }).waitFor();
 };
-const listRow = (page: Page, name: string) => page.locator("ul.games > li.row").filter({ has: page.getByText(name, { exact: true }) });
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const label = (name: string) => new RegExp(`^(.+: )?${esc(name)}$`);
+const listRow = (page: Page, name: string) => page.locator("ul.games > li.row").filter({ has: page.locator(":scope > span:first-child", { hasText: label(name) }) });
+/** Back on the Games screen, wherever a failed check left the page. */
+async function home(page: Page) {
+  const backBtn = page.getByRole("button", { name: "Back to Games" });
+  if (await backBtn.isVisible()) await backBtn.click();
+  await page.getByRole("heading", { name: "Games", exact: true }).waitFor();
+}
 const noError = async (page: Page) => {
   await page.waitForTimeout(300);
   const err = page.locator("main > p.error");
@@ -294,6 +321,7 @@ async function writes(page: Page) {
     await goTo(page, "Platforms");
     const before = await page.locator("ul.games > li.row").count();
     const existing = (await page.locator("ul.games > li.row > span:first-child").first().innerText()).trim();
+    expectedErrors.push(`already a Platform called "${existing.toUpperCase()}"`);
     await page.getByPlaceholder("Add a Platform").fill(` ${existing.toUpperCase()} `);
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await page.locator("main > p.error").waitFor({ timeout: 10_000 });
@@ -326,7 +354,66 @@ async function writes(page: Page) {
     await back(page);
   });
 
-  results.push({ name: "Games: add / Copies / Tags / merge", ok: true, detail: "SKIPPED: the app can't delete a Game, so a QA Game would stay in the catalog" });
+  const gameRow = (name: string) => rows(page).filter({ has: page.locator("button.row > span:first-child", { hasText: label(name) }) });
+  const addGame = async (name: string) => {
+    await home(page);
+    await page.getByPlaceholder("Add a Game").fill(name);
+    await page.locator("form.add").getByRole("button", { name: "Add", exact: true }).click();
+    await gameRow(name).waitFor({ timeout: 10_000 });
+  };
+  const open = async (name: string) => {
+    const btn = gameRow(name).locator("button.row");
+    if ((await btn.getAttribute("aria-expanded")) !== "true") await btn.click();
+    await gameRow(name).locator(".detail").first().waitFor();
+    return gameRow(name);
+  };
+
+  await check(page, "Games: add, Copy, Tag, Play status, Wishlist rule", async () => {
+    await addGame(`${run}-game`);
+    const row = await open(`${run}-game`);
+    await row.getByText("No Copies: not Owned.").waitFor();
+    await row.getByRole("button", { name: "Add Copy" }).click();
+    await row.getByRole("button", { name: "Remove" }).first().waitFor({ timeout: 10_000 });
+    await row.getByLabel("Add a Tag").fill("Co-op");
+    await row.getByRole("button", { name: "Add Tag" }).click();
+    await row.getByRole("button", { name: "Remove Tag Co-op" }).waitFor({ timeout: 10_000 });
+    await row.locator("label", { hasText: "Play status" }).locator("select").selectOption("Backlog");
+    await page.waitForTimeout(800);
+    expect(await row.locator("label", { hasText: "Wishlist" }).locator("input").isDisabled(), "Wishlist allowed on an owned Game");
+    await page.reload();
+    await page.locator("ul.games").waitFor();
+    const badges = await gameRow(`${run}-game`).locator(".badges").innerText();
+    expect(/1 Copy/.test(badges) && badges.includes("Backlog") && badges.includes("Co-op"), `after reload: ${badges}`);
+  });
+
+  await check(page, "Games: merge one into another", async () => {
+    await addGame(`${run}-dupe`);
+    const row = await open(`${run}-dupe`);
+    await row.getByRole("button", { name: "Merge into another Game…" }).click();
+    await row.locator(".merge select").first().selectOption({ label: `${run}-game` });
+    await row.locator(".merge").getByRole("button", { name: "Merge", exact: true }).click();
+    await gameRow(`${run}-dupe`).waitFor({ state: "detached", timeout: 10_000 });
+    expect((await gameRow(`${run}-game`).count()) === 1, "kept Game missing");
+  });
+
+  await check(page, "Games: Missing info finds a Game with no Tags", async () => {
+    await addGame(`${run}-bare`);
+    await page.getByLabel("Missing info").selectOption("tags");
+    expect((await gameRow(`${run}-bare`).count()) === 1, "untagged QA Game not listed");
+    expect((await gameRow(`${run}-game`).count()) === 0, "tagged QA Game listed");
+    await clearFilters(page);
+  });
+
+  await check(page, "Games: delete", async () => {
+    for (const name of [`${run}-game`, `${run}-bare`]) {
+      const row = await open(name);
+      await row.getByRole("button", { name: "Delete Game…" }).click();
+      await gameRow(name).waitFor({ state: "detached", timeout: 10_000 });
+    }
+    await page.reload();
+    await page.locator("ul.games").waitFor();
+    expect((await rows(page).filter({ hasText: run }).count()) === 0, "a QA Game came back after reload");
+  });
 }
 
 /** Deletes every QA-… Platform, Account and Tag, including ones a crashed earlier run left. */
@@ -336,7 +423,7 @@ async function sweep(page: Page) {
   for (const screen of ["Platforms", "Accounts", "Tags"]) {
     await goTo(page, screen);
     for (;;) {
-      const row = page.locator("ul.games > li.row").filter({ hasText: new RegExp(`^${QA}`) }).first();
+      const row = page.locator("ul.games > li.row").filter({ has: page.locator(":scope > span:first-child", { hasText: new RegExp(`^(.+: )?${QA}`) }) }).first();
       if (!(await row.count())) break;
       const name = (await row.locator("span").first().innerText()).trim();
       await row.getByRole("button", { name: "Delete" }).click();
@@ -344,10 +431,20 @@ async function sweep(page: Page) {
       if (await page.locator("main > p.error").isVisible()) { left.push(`${screen}: ${name} (${await page.locator("main > p.error").innerText()})`); break; }
       results.push({ name: `swept leftover ${screen}: ${name}`, ok: true });
     }
-    await back(page);
+    await home(page);
   }
-  const games = await page.locator("ul.games > li > button.row").filter({ hasText: new RegExp(`^${QA}`) }).count();
-  if (games) left.push(`${games} QA Games (no delete in the app)`);
+  await page.getByLabel("Wishlist or Owned").selectOption("all");
+  for (;;) {
+    const row = rows(page).filter({ has: page.locator("button.row > span:first-child", { hasText: new RegExp(`^${QA}`) }) }).first();
+    if (!(await row.count())) break;
+    const name = (await row.locator("button.row > span:first-child").evaluate((s) => s.childNodes[0]?.textContent ?? "")).trim();
+    if ((await row.locator("button.row").getAttribute("aria-expanded")) !== "true") await row.locator("button.row").click();
+    await row.getByRole("button", { name: "Delete Game…" }).click();
+    await page.waitForTimeout(1000);
+    if (await row.locator(".error").count()) { left.push(`Game: ${name}`); break; }
+    results.push({ name: `swept leftover Game: ${name}`, ok: true });
+  }
+  await clearFilters(page);
   results.push({ name: "nothing QA-… left behind", ok: left.length === 0, detail: left.join("; ") || undefined });
 }
 

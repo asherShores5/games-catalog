@@ -180,9 +180,9 @@ describe("Import from Steam", () => {
     const g = await h.call(h.owner, "addGame", { name: "Hades" });
     const tags: { id: string; name: string }[] = await h.call(h.owner, "tags");
     const tagId = (name: string) => tags.find((t) => t.name === name)!.id;
-    await h.call(h.owner, "addGameTag", { gameId: g.id, tagId: tagId("single-player") });
-    await h.call(h.owner, "addGameTag", { gameId: g.id, tagId: tagId("co-op") });
-    const tagged = await h.call(h.owner, "removeGameTag", { gameId: g.id, tagId: tagId("co-op") });
+    await h.call(h.owner, "addGameTag", { gameId: g.id, tagId: tagId("Single-player") });
+    await h.call(h.owner, "addGameTag", { gameId: g.id, tagId: tagId("Co-op") });
+    const tagged = await h.call(h.owner, "removeGameTag", { gameId: g.id, tagId: tagId("Co-op") });
     h.steam.set(STEAM_ID, [{ appId: 1145360, name: "Hades" }]);
 
     await h.call(h.owner, "importSteam", { accountId: steam.id });
@@ -191,7 +191,7 @@ describe("Import from Steam", () => {
     expect(game.copies).toHaveLength(1);
     expect(game.tags).toEqual(tagged.tags);
     const rec = h.db.dump().find((r) => r.SK === "GAME#" + g.id)!;
-    expect(rec.removedTagIds).toEqual([tagId("co-op")]);
+    expect(rec.removedTagIds).toEqual([tagId("Co-op")]);
   });
 
   it("a Wishlist Game that turns up in the library leaves the Wishlist as Backlog", async () => {

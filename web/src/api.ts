@@ -37,6 +37,7 @@ export const Q = {
   removeGameTag: `mutation($gameId: ID!, $tagId: ID!) { removeGameTag(gameId: $gameId, tagId: $tagId) { ${GAME} } }`,
   // Two forms: leaving playStatus out means "keep the more advanced one"; null means none.
   mergeGames: `mutation($fromId: ID!, $intoId: ID!) { mergeGames(fromId: $fromId, intoId: $intoId) { ${GAME} } }`,
+  deleteGame: `mutation($id: ID!) { deleteGame(id: $id) }`,
   mergeGamesWithStatus: `mutation($fromId: ID!, $intoId: ID!, $playStatus: PlayStatus) {
     mergeGames(fromId: $fromId, intoId: $intoId, playStatus: $playStatus) { ${GAME} } }`,
 };
@@ -119,3 +120,5 @@ export const mergeGames = async (fromId: string, intoId: string, choice?: { play
       : await gql<{ mergeGames: Game }>(Q.mergeGames, { fromId, intoId })
     ).mergeGames,
   );
+
+export const deleteGame = async (id: string) => (await gql<{ deleteGame: string }>(Q.deleteGame, { id })).deleteGame;

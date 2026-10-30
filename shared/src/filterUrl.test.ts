@@ -25,6 +25,12 @@ describe("filter in the URL", () => {
     expect(filterFromUrl("?tag=&tag=a&tag=a")).toEqual({ tagIds: ["a"] });
   });
 
+  it("keeps the Missing info choice as missing=", () => {
+    expect(filterToUrl({ missing: "tags" })).toBe("missing=tags");
+    for (const missing of ["location", "tags", "any"] as const) expect(filterFromUrl(filterToUrl({ missing }))).toEqual({ missing });
+    expect(filterFromUrl("?missing=price")).toEqual({});
+  });
+
   it("reads an empty URL as the full list", () => {
     expect(filterFromUrl("")).toEqual({});
     expect(filterFromUrl("?")).toEqual({});

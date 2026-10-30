@@ -61,7 +61,7 @@ describe("Merge Games", () => {
   });
 
   it("Tags combine with their sources and my removals", async () => {
-    const [coop, versus, narrative] = [await tagId("co-op"), await tagId("versus"), await tagId("narrative")];
+    const [coop, versus, narrative] = [await tagId("Co-op"), await tagId("Versus"), await tagId("Sports")];
     const into = await h.call(h.owner, "addGame", { name: "Portal 2" });
     const from = await h.call(h.owner, "addGame", { name: "Portal 2 (copy)" });
     // `from` has an imported co-op link and a removed versus; `into` has co-op by hand.
@@ -197,7 +197,7 @@ describe("Merge Games and Steam Imports", () => {
     const [a, b] = await allGames();
     await h.call(h.owner, "mergeGames", { fromId: b.id, intoId: a.id });
     await h.call(h.owner, "setPlayStatus", { gameId: a.id, playStatus: "Playing" });
-    await h.call(h.owner, "addGameTag", { gameId: a.id, tagId: await tagId("co-op") });
+    await h.call(h.owner, "addGameTag", { gameId: a.id, tagId: await tagId("Co-op") });
     expect(gameRecord(a.id).mergedSteamAppIds).toEqual([b.steamAppId]);
   });
 });
