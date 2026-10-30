@@ -1,5 +1,5 @@
 // Steam store Categories and Genres -> Tag names (see GLOSSARY.md: Tag, Import). Pure.
-import { cleanTagName, sameTagName, type Tag } from "./tag";
+import { SIMPLE_TAGS, cleanTagName, sameTagName, type Tag } from "./tag";
 
 /**
  * A Tag as an Import sees it. `aliases` are the Tag's former names and the names of Tags merged
@@ -38,54 +38,44 @@ export function addTagNames(names: string[], ...more: string[]): string[] {
 }
 
 /**
- * Steam names that land on one of my common Tags. Matched like Tag names (sameTagName), and the
- * target is matched against my Tags the same way, so a renamed "Co-op" still catches "co-op".
+ * Steam store Category or Genre -> the simple Tags it means. Anything not here (achievements,
+ * controller brands, Remote Play, VR, Indie, Free To Play, software genres…) is dropped: it
+ * doesn't help pick a game. Offline comes from playing alone or on one screen.
  */
-export const STEAM_TAG_MAP: Readonly<Record<string, string>> = {
-  "Single-player": "single-player",
-  "Co-op": "co-op",
-  "Online Co-op": "co-op",
-  "LAN Co-op": "co-op",
-  "Shared/Split Screen Co-op": "co-op",
-  "PvP": "versus",
-  "Online PvP": "versus",
-  "LAN PvP": "versus",
-  "Shared/Split Screen PvP": "versus",
+export const STEAM_TAGS: Readonly<Record<string, readonly string[]>> = {
+  "Single-player": ["Single-player", "Offline"],
+  "Multi-player": ["Multiplayer"],
+  "Co-op": ["Multiplayer", "Co-op"],
+  "Online Co-op": ["Multiplayer", "Co-op", "Online"],
+  "LAN Co-op": ["Multiplayer", "Co-op"],
+  "Shared/Split Screen Co-op": ["Multiplayer", "Co-op", "Couch co-op", "Offline"],
+  "Shared/Split Screen": ["Multiplayer", "Offline"],
+  "PvP": ["Multiplayer", "Versus"],
+  "Online PvP": ["Multiplayer", "Online", "Versus"],
+  "LAN PvP": ["Multiplayer", "Versus"],
+  "Shared/Split Screen PvP": ["Multiplayer", "Offline", "Versus"],
+  "MMO": ["Multiplayer", "Online"],
+  "Massively Multiplayer": ["Multiplayer", "Online"],
+  "Cross-Platform Multiplayer": ["Multiplayer", "Online"],
+  "Full controller support": ["Controller"],
+  "Action": ["Action"],
+  "Adventure": ["Adventure"],
+  "RPG": ["RPG"],
+  "Strategy": ["Strategy"],
+  "Simulation": ["Simulation"],
+  "Casual": ["Casual"],
+  "Racing": ["Racing"],
+  "Sports": ["Sports"],
 };
 
-/**
- * Store Categories that describe the Steam store or client, not the game. They'd flood the Tag
- * list without helping me pick what to play, so an Import skips them. Everything else Steam
- * sends (Multi-player, MMO, VR Only, every Genre…) becomes a Tag as-is. "Full controller support"
- * and "Remote Play Together" are deliberately NOT here (Asher's decision): couch play with a pad,
- * or co-op over Remote Play, is a real reason to pick a game.
- */
-export const STEAM_IGNORED_CATEGORIES: readonly string[] = [
-  "Steam Achievements", "Steam Trading Cards", "Steam Cloud", "Steam Leaderboards", "Steam Workshop",
-  "Steam Turn Notifications", "Steam Timeline", "Steam is learning about this game", "SteamVR Collectibles",
-  "Steam China Workshop", "Stats", "Partial Controller Support",
-  "Tracked Controller Support", "Family Sharing", "In-App Purchases", "Downloadable Content",
-  "Remote Play on Phone", "Remote Play on Tablet", "Remote Play on TV",
-  "Valve Anti-Cheat enabled", "Includes Source SDK", "Captions available", "Commentary available",
-  "HDR available", "Profile Features Limited", "Additional High-Quality Audio",
-  // Steam's accessibility features.
-  "Adjustable Text Size", "Adjustable Difficulty", "Color Alternatives", "Camera Comfort",
-  "Custom Volume Controls", "Playable without Timed Input", "Stereo Sound", "Surround Sound",
-  "Save Anytime", "Subtitle Options", "Mouse Only Option", "Touch Only Option", "Keyboard Only Option",
-  "Narrated Game Menus", "Chat Speech-to-text", "Chat Text-to-speech",
-];
-
-/**
- * The Tag names one Steam app brings: Categories then Genres, mapped (STEAM_TAG_MAP), store
- * features dropped, blanks and names too long for a Tag skipped, each name once.
- */
+/** The simple Tags one Steam app brings (STEAM_TAGS), each once, in SIMPLE_TAGS order. */
 export function storeTagNames(categories: string[], genres: string[]): string[] {
-  const out: string[] = [];
+  const wanted = new Set<string>();
   for (const raw of [...categories, ...genres]) {
     const name = cleanTagName(raw);
-    if (!name || STEAM_IGNORED_CATEGORIES.some((n) => sameTagName(n, name))) continue;
-    const mapped = Object.entries(STEAM_TAG_MAP).find(([steam]) => sameTagName(steam, name))?.[1] ?? name;
-    if (!out.some((n) => sameTagName(n, mapped))) out.push(mapped);
+    if (!name) continue;
+    const entry = Object.entries(STEAM_TAGS).find(([steam]) => sameTagName(steam, name));
+    for (const tag of entry?.[1] ?? []) wanted.add(tag);
   }
-  return out;
+  return SIMPLE_TAGS.filter((t) => wanted.has(t));
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { byName, filterFromUrl, filterToUrl, PLAY_STATUSES, type GameFilter, type Ownership, type Platform, type PlayStatus, type Tag } from "@games/shared";
+import { byName, filterFromUrl, filterToUrl, PLAY_STATUSES, type GameFilter, type Missing, type Ownership, type Platform, type PlayStatus, type Tag } from "@games/shared";
 
 /** The list filter, kept in the page URL (replaceState, so typing doesn't pile up history entries). */
 export function useUrlFilter(): [GameFilter, (filter: GameFilter) => void] {
@@ -12,7 +12,7 @@ export function useUrlFilter(): [GameFilter, (filter: GameFilter) => void] {
   return [filter, setFilter];
 }
 
-/** Search box plus Platform, Wishlist / Owned, Play status and Tag filters. All combine (AND). */
+/** Search box plus Platform, Wishlist / Owned, Play status, Missing info and Tag filters. All combine (AND). */
 export function FilterBar({ filter, onChange, platforms, tags = [] }: {
   filter: GameFilter;
   onChange: (filter: GameFilter) => void;
@@ -43,6 +43,12 @@ export function FilterBar({ filter, onChange, platforms, tags = [] }: {
         <select aria-label="Play status" value={filter.playStatus ?? ""} onChange={(e) => set({ playStatus: (e.target.value || undefined) as PlayStatus | undefined })}>
           <option value="">Any Play status</option>
           {PLAY_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+        <select aria-label="Missing info" value={filter.missing ?? ""} onChange={(e) => set({ missing: (e.target.value || undefined) as Missing | undefined })}>
+          <option value="">Any info</option>
+          <option value="location">No location</option>
+          <option value="tags">No Tags</option>
+          <option value="any">Missing either</option>
         </select>
         {/* Tags: every selected Tag must be on the Game (AND). Picking one adds it; × removes it. */}
         <select aria-label="Add a Tag filter" value="" onChange={(e) => e.target.value && set({ tagIds: [...selectedTags, e.target.value] })}>

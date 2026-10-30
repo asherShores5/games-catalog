@@ -182,3 +182,31 @@ describe("pruning Tags that no longer exist from the filter", () => {
     expect(withoutUnknownTags(none, tags)).toBe(none);
   });
 });
+
+describe("Missing info filter", () => {
+  const known = { id: "c1", platformId: "pc", format: "Digital" as const, createdAt: 1 };
+  const unknown = { id: "c2", createdAt: 1 };
+  const g = (name: string, copies: object[], tagIds: string[] = [], wishlist = false) =>
+    ({ name, copies, wishlist, playStatus: null, tags: tagIds.map((tagId) => ({ tagId, source: "Manual" as const })) }) as never;
+  const games = [
+    g("Complete", [known], ["coop"]),
+    g("Nowhere", [unknown], ["coop"]),
+    g("Untagged", [known]),
+    g("Both", [unknown]),
+    g("Wished", [], [], true),
+  ];
+  const names = (filter: Parameters<typeof gameMatches>[1]) => games.filter((x) => gameMatches(x, filter)).map((x: { name: string }) => x.name);
+
+  it("No location keeps Games with an Unknown Copy", () => {
+    expect(names({ missing: "location" })).toEqual(["Nowhere", "Both"]);
+  });
+
+  it("No Tags keeps Games without a Tag", () => {
+    expect(names({ missing: "tags" })).toEqual(["Untagged", "Both"]);
+    expect(names({ missing: "tags", ownership: "all" })).toEqual(["Untagged", "Both", "Wished"]);
+  });
+
+  it("Either keeps Games missing one or the other", () => {
+    expect(names({ missing: "any" })).toEqual(["Nowhere", "Untagged", "Both"]);
+  });
+});

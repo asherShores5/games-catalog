@@ -113,6 +113,7 @@ export class AppStack extends Stack {
     for (const field of ["addTag", "renameTag", "deleteTag", "mergeTags", "addGameTag", "removeGameTag"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
     // Merge Games (ticket 09).
     ds.createResolver("MmergeGames", { typeName: "Mutation", fieldName: "mergeGames" });
+    ds.createResolver("MdeleteGame", { typeName: "Mutation", fieldName: "deleteGame" });
 
     // The web app's /config.json takes these values (see web/public/config.example.json).
     // ---- cost guardrail: everything here is tagged app=games-catalog (bin/app.ts) ----

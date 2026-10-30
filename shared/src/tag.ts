@@ -9,7 +9,15 @@ export interface Tag {
 export const TAG_NAME_MAX = 50;
 
 /** Tags every new catalog starts with. Editable afterwards like any other. */
-export const SEED_TAGS = ["single-player", "co-op", "versus", "narrative", "open-world", "platformer"] as const;
+/**
+ * The Tag list: a few broad Tags that answer "what can I play tonight, alone or with my wife?".
+ * How it plays first, then genre. Every account starts with these; Imports produce only these.
+ */
+export const SIMPLE_TAGS: readonly string[] = [
+  "Single-player", "Multiplayer", "Co-op", "Couch co-op", "Online", "Offline", "Versus", "Controller",
+  "Action", "Adventure", "RPG", "Strategy", "Simulation", "Casual", "Racing", "Sports",
+];
+export const SEED_TAGS = SIMPLE_TAGS;
 
 /** A Tag name as stored: trimmed, 1..TAG_NAME_MAX characters. Undefined when the input can't be one. */
 export function cleanTagName(raw: unknown): string | undefined {
