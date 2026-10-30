@@ -1,5 +1,5 @@
 import {
-  CfnOutput, Duration, RemovalPolicy, Stack, type StackProps,
+  CfnOutput, Duration, Fn, RemovalPolicy, Stack, type StackProps,
   aws_appsync as appsync,
   aws_certificatemanager as acm,
   aws_cloudfront as cloudfront,
@@ -68,9 +68,13 @@ export class WebStack extends Stack {
           contentSecurityPolicy: [
             "default-src 'self'",
             "script-src 'self'",
-            "style-src 'self' 'unsafe-inline'",
+            "style-src 'self'",
             "img-src 'self' data:",
-            `connect-src 'self' https://*.appsync-api.${region}.amazonaws.com https://cognito-idp.${region}.amazonaws.com`,
+            // This app's API only (its URL is https://<host>/graphql), not any AppSync API: injected
+            // script couldn't send tokens to an AppSync API someone else owns.
+            `connect-src 'self' https://${Fn.select(2, Fn.split("/", props.api.graphqlUrl))} https://cognito-idp.${region}.amazonaws.com`,
+            "object-src 'none'",
+            "form-action 'self'",
             "manifest-src 'self'",
             "worker-src 'self'",
             "frame-ancestors 'none'",
@@ -81,6 +85,12 @@ export class WebStack extends Stack {
         contentTypeOptions: { override: true },
         frameOptions: { override: true, frameOption: cloudfront.HeadersFrameOption.DENY },
         referrerPolicy: { override: true, referrerPolicy: cloudfront.HeadersReferrerPolicy.SAME_ORIGIN },
+      },
+      customHeadersBehavior: {
+        customHeaders: [
+          { header: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()", override: true },
+          { header: "Cross-Origin-Opener-Policy", value: "same-origin", override: true },
+        ],
       },
     });
 

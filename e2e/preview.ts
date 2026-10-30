@@ -58,7 +58,11 @@ async function serve(page: Page, signedIn: boolean) {
     if (!file.startsWith(DIST) || !existsSync(file) || url.pathname === "/") file = path.join(DIST, "index.html");
     // No service worker in previews: it would cache the old CSS between runs.
     if (url.pathname.endsWith("sw.js")) return route.fulfill({ status: 404, body: "" });
-    return route.fulfill({ body: readFileSync(file), contentType: TYPES[path.extname(file)] ?? "application/octet-stream" });
+    // Same CSP as CloudFront serves (infra/lib/hosting.ts), so a violation shows up here first.
+    const csp = ["default-src 'self'", "script-src 'self'", "style-src 'self'", "img-src 'self' data:",
+      `connect-src 'self' https://${new URL(GRAPHQL).host} https://cognito-idp.us-west-1.amazonaws.com`, "object-src 'none'",
+      "form-action 'self'", "manifest-src 'self'", "worker-src 'self'", "frame-ancestors 'none'", "base-uri 'self'"].join("; ");
+    return route.fulfill({ body: readFileSync(file), contentType: TYPES[path.extname(file)] ?? "application/octet-stream", headers: { "Content-Security-Policy": csp } });
   });
   await page.route(GRAPHQL, async (route) => {
     const { query } = route.request().postDataJSON() as { query: string };
@@ -80,6 +84,7 @@ async function shoot(context: BrowserContextOptions, label: string) {
   const page = await ctx.newPage();
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(e.message));
+  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   const snap = (name: string) => page.screenshot({ path: path.join(OUT, `preview-${label}-${name}.png`), fullPage: true });
 
   await serve(page, false);
@@ -90,6 +95,7 @@ async function shoot(context: BrowserContextOptions, label: string) {
 
   const signed = await ctx.newPage();
   signed.on("pageerror", (e) => errors.push(e.message));
+  signed.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   await serve(signed, true);
   await signed.goto(ORIGIN);
   await signed.locator("ul.games").waitFor();

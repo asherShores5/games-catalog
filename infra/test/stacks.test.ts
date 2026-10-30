@@ -46,6 +46,19 @@ describe("auth", () => {
   });
 });
 
+describe("API hardening", () => {
+  it("doesn't describe itself to callers, and caps query depth and resolvers per request", () => {
+    app.hasResourceProperties("AWS::AppSync::GraphQLApi", {
+      IntrospectionConfig: "DISABLED",
+      QueryDepthLimit: Match.anyValue(),
+      ResolverCountLimit: Match.anyValue(),
+    });
+    const [api] = Object.values(app.findResources("AWS::AppSync::GraphQLApi"));
+    expect(api.Properties.QueryDepthLimit).toBeLessThanOrEqual(5);
+    expect(api.Properties.ResolverCountLimit).toBeLessThanOrEqual(5);
+  });
+});
+
 describe("cost guardrail", () => {
   it("a $1 monthly budget on this app's tag emails at 80% actual and 100% forecast", () => {
     app.hasResourceProperties("AWS::Budgets::Budget", {
@@ -99,6 +112,34 @@ describe("Steam Web API key", () => {
   it("the Merge Games mutation has a resolver", () => {
     const fields = Object.values(app.findResources("AWS::AppSync::Resolver")).map((r) => r.Properties.FieldName);
     expect(fields).toContain("mergeGames");
+  });
+});
+
+describe("browser hardening", () => {
+  const csp = () => {
+    const [policy] = Object.values(web.findResources("AWS::CloudFront::ResponseHeadersPolicy"));
+    return policy.Properties.ResponseHeadersPolicyConfig as any;
+  };
+  const cspText = () => JSON.stringify(csp().SecurityHeadersConfig.ContentSecurityPolicy.ContentSecurityPolicy);
+
+  it("the page may only talk to this app's own AppSync API and Cognito, not any AppSync API", () => {
+    expect(cspText()).not.toContain("*.appsync-api");
+    // The exact host, taken from the API's own URL at deploy time (https://<host>/graphql).
+    expect(cspText()).toMatch(/Fn::Select.*\[2,.*Fn::Split.*"\/"/);
+    expect(cspText()).toContain("https://cognito-idp.us-west-1.amazonaws.com");
+  });
+
+  it("no inline styles or scripts, no plugins, forms post nowhere else", () => {
+    expect(cspText()).not.toContain("unsafe-inline");
+    expect(cspText()).not.toContain("unsafe-eval");
+    expect(cspText()).toContain("object-src 'none'");
+    expect(cspText()).toContain("form-action 'self'");
+  });
+
+  it("turns off browser features the app never uses and isolates the window", () => {
+    const custom = csp().CustomHeadersConfig.Items.map((i: any) => [i.Header, i.Value]);
+    expect(custom).toContainEqual(["Permissions-Policy", expect.stringContaining("camera=()")]);
+    expect(custom).toContainEqual(["Cross-Origin-Opener-Policy", "same-origin"]);
   });
 });
 

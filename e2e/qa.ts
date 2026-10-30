@@ -304,7 +304,7 @@ async function deleteRow(page: Page, name: string) {
 }
 
 async function writes(page: Page) {
-  page.on("dialog", (d) => void d.accept()); // Tag delete asks to confirm
+  acceptDialogs(page);
 
   await check(page, "Platforms: add, rename, delete", async () => {
     await goTo(page, "Platforms");
@@ -354,7 +354,9 @@ async function writes(page: Page) {
     await back(page);
   });
 
-  const gameRow = (name: string) => rows(page).filter({ has: page.locator("button.row > span:first-child", { hasText: label(name) }) });
+  // A closed row's first span also holds the Copy summary right after the name, so match the start
+  // only (no QA Game name here is the start of another).
+  const gameRow = (name: string) => rows(page).filter({ has: page.locator("button.row > span:first-child", { hasText: new RegExp(`^${esc(name)}`) }) });
   const addGame = async (name: string) => {
     await home(page);
     await page.getByPlaceholder("Add a Game").fill(name);
@@ -416,9 +418,17 @@ async function writes(page: Page) {
   });
 }
 
-/** Deletes every QA-… Platform, Account and Tag, including ones a crashed earlier run left. */
+/** Say OK to the app's confirm() prompts (Tag and Game delete). One handler per page: two would both answer. */
+const accepting = new WeakSet<Page>();
+function acceptDialogs(page: Page) {
+  if (accepting.has(page)) return;
+  accepting.add(page);
+  page.on("dialog", (d) => void d.accept().catch(() => {}));
+}
+
+/** Deletes every QA-… Game, Platform, Account and Tag, including ones a crashed earlier run left. */
 async function sweep(page: Page) {
-  page.on("dialog", (d) => void d.accept());
+  acceptDialogs(page);
   const left: string[] = [];
   for (const screen of ["Platforms", "Accounts", "Tags"]) {
     await goTo(page, screen);
