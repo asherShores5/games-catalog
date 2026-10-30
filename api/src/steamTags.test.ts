@@ -211,3 +211,82 @@ describe("Steam Tag Import: filtering", () => {
     expect(games.filter((g: never) => gameMatches(g, filter)).map((g: { name: string }) => g.name)).toEqual(["Portal 2"]);
   });
 });
+
+describe("Steam Tag Import: my Tag edits stick", () => {
+  /** Import Hades with this store page. */
+  async function importHades(categories: string[], genres: string[]) {
+    const steam = await steamAccount();
+    h.steam.set(STEAM_ID, [HADES]);
+    h.steam.setDetails(HADES.appId, { categories, genres });
+    await importSteam(steam.id);
+    return steam;
+  }
+  /** Import again with every Game's store page due for a refresh. */
+  async function refresh(steamAccountId: string) {
+    for (const g of await h.call(h.owner, "games")) h.db.seed({ ...gameRecOf(g.id), storeTagsAt: Date.now() - 31 * DAY });
+    return importSteam(steamAccountId);
+  }
+  const allNames = async () => [...(await tagNames()).values()].sort();
+
+  it("a renamed seeded Tag still catches its Steam Categories; the old name isn't re-created", async () => {
+    const steam = await steamAccount();
+    await h.call(h.owner, "renameTag", { id: await tagId("co-op"), name: "Co-operative" });
+    h.steam.set(STEAM_ID, [PORTAL]);
+    h.steam.setDetails(PORTAL.appId, { categories: ["Online Co-op"], genres: [] });
+
+    await importSteam(steam.id);
+
+    expect((await gameTags())["Portal 2"]).toEqual(["Co-operative/Import"]);
+    expect(await allNames()).not.toContain("co-op");
+  });
+
+  it("a renamed imported Tag keeps catching its Steam name on a refresh", async () => {
+    const steam = await importHades([], ["Action"]);
+    await h.call(h.owner, "renameTag", { id: await tagId("Action"), name: "Action games" });
+
+    expect(await refresh(steam.id)).toMatchObject({ tagged: 1, failed: 0 });
+
+    expect((await gameTags()).Hades).toEqual(["Action games/Import"]);
+    expect(await allNames()).not.toContain("Action");
+  });
+
+  it("a deleted imported Tag isn't re-created by a refresh or by a new Game", async () => {
+    const steam = await importHades([], ["Action", "Indie"]);
+    await h.call(h.owner, "deleteTag", { id: await tagId("Indie") });
+    h.steam.set(STEAM_ID, [HADES, PORTAL]);
+    h.steam.setDetails(PORTAL.appId, { categories: [], genres: ["Indie"] });
+
+    await refresh(steam.id);
+
+    expect(await gameTags()).toEqual({ Hades: ["Action/Import"], "Portal 2": [] });
+    expect(await allNames()).not.toContain("Indie");
+  });
+
+  it("a Tag merged away isn't re-created; its Steam name lands on the Tag it merged into", async () => {
+    const steam = await importHades([], ["Indie"]);
+    const into = await h.call(h.owner, "addTag", { name: "indie games" });
+    await h.call(h.owner, "mergeTags", { fromId: await tagId("Indie"), intoId: into.id });
+    h.steam.set(STEAM_ID, [HADES, PORTAL]);
+    h.steam.setDetails(PORTAL.appId, { categories: [], genres: ["Indie"] });
+
+    await refresh(steam.id);
+
+    expect(await gameTags()).toEqual({ Hades: ["indie games/Import"], "Portal 2": ["indie games/Import"] });
+    expect(await allNames()).not.toContain("Indie");
+  });
+
+  it("a Tag I re-create by hand after deleting it is used by Imports again", async () => {
+    const steam = await importHades([], ["Indie"]);
+    await h.call(h.owner, "deleteTag", { id: await tagId("Indie") });
+    await h.call(h.owner, "addTag", { name: "Indie" });
+
+    await refresh(steam.id);
+
+    expect((await gameTags()).Hades).toEqual(["Indie/Import"]);
+  });
+
+  it("the Steam names behind a Tag stay private", async () => {
+    await h.call(h.owner, "renameTag", { id: await tagId("co-op"), name: "Co-operative" });
+    for (const t of await h.call(h.owner, "tags")) expect(Object.keys(t).sort()).toEqual(["id", "name"]);
+  });
+});

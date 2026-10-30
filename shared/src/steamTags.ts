@@ -1,5 +1,41 @@
 // Steam store Categories and Genres -> Tag names (see GLOSSARY.md: Tag, Import). Pure.
-import { cleanTagName, sameTagName } from "./tag";
+import { cleanTagName, sameTagName, type Tag } from "./tag";
+
+/**
+ * A Tag as an Import sees it. `aliases` are the Tag's former names and the names of Tags merged
+ * into it (private, API only): a store name matching one lands on this Tag, so my renames and
+ * merges stick across Imports.
+ */
+export interface ImportableTag extends Tag {
+  aliases: string[];
+}
+
+/** What an Import does with one store Tag name. */
+export type ImportTagMatch = { tagId: string } | { create: string } | { skip: true };
+
+/**
+ * Resolve one store Tag name (after storeTagNames) against my Tags:
+ * 1. a Tag with that name now;
+ * 2. else a Tag that had that name (renamed) or absorbed it (merged);
+ * 3. else, if I deleted a Tag by that name (`droppedNames`), nothing: deleting it means I don't want it;
+ * 4. else a new Tag with that name.
+ * A current name wins over an alias, so a Tag I re-create by hand after a delete is used again.
+ */
+export function matchImportTag(name: string, tags: ImportableTag[], droppedNames: string[]): ImportTagMatch {
+  const byName = tags.find((t) => sameTagName(t.name, name));
+  if (byName) return { tagId: byName.id };
+  const byAlias = tags.find((t) => t.aliases.some((a) => sameTagName(a, name)));
+  if (byAlias) return { tagId: byAlias.id };
+  if (droppedNames.some((n) => sameTagName(n, name))) return { skip: true };
+  return { create: name };
+}
+
+/** `names` plus `more`, each name once (sameTagName). */
+export function addTagNames(names: string[], ...more: string[]): string[] {
+  const out = [...names];
+  for (const n of more) if (!out.some((x) => sameTagName(x, n))) out.push(n);
+  return out;
+}
 
 /**
  * Steam names that land on one of my common Tags. Matched like Tag names (sameTagName), and the

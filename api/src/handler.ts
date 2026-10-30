@@ -9,7 +9,7 @@ import {
 } from "@games/shared";
 import {
   SEED_TAGS, addManualTag, dropTag, importTags, mentionsTag, moveTag, planMerge, removeGameTag as unlinkTag,
-  sameTagName, storeTagNames, type MergeSide,
+  addTagNames, matchImportTag, sameTagName, storeTagNames, type ImportableTag, type MergeSide,
   type GameTag, type GameTags, type Tag,
 } from "@games/shared";
 import {
@@ -727,14 +727,17 @@ async function lookUpStoreTags(ctx: Ctx, steps: ImportStep[], started: number): 
   }
   if (names.size === 0) return new Map();
 
-  const known = await allTags(ctx);
+  // My renames, merges and deletes decide where each store name lands (matchImportTag).
+  const known = await allTagRecs(ctx);
+  const dropped = await droppedTagNames(ctx);
   const idFor = new Map<string, string | undefined>();
   const tagIdFor = async (name: string) => {
-    const tag = known.find((t) => sameTagName(t.name, name));
-    if (tag) return tag.id;
+    const match = matchImportTag(name, known, dropped);
+    if ("tagId" in match) return match.tagId;
+    if ("skip" in match) return undefined;
     try {
-      const created = await addTag(ctx, { name });
-      known.push(created);
+      const created = await addTag(ctx, { name: match.create });
+      known.push({ ...created, aliases: [] });
       return created.id;
     } catch (e) {
       // A Tag name the rules refuse: skip that Tag, keep the rest.
@@ -787,9 +790,36 @@ function tagOut(rec: Rec): Tag {
   return { id: rec.id as string, name: rec.name as string };
 }
 
-async function allTags(ctx: Ctx) {
+/** The Tag with its private `aliases` (former names, merged-away names), for Imports. */
+function importableTag(rec: Rec): ImportableTag {
+  return { ...tagOut(rec), aliases: (rec.aliases as string[] | undefined) ?? [] };
+}
+
+async function allTagRecs(ctx: Ctx): Promise<ImportableTag[]> {
   await ensureTags(ctx);
-  return (await queryPrefix(ctx, "TAG#")).map(tagOut).sort(byName);
+  return (await queryPrefix(ctx, "TAG#")).map(importableTag);
+}
+
+async function allTags(ctx: Ctx) {
+  return (await allTagRecs(ctx)).map(({ id, name }): Tag => ({ id, name })).sort(byName);
+}
+
+async function getTagRec(ctx: Ctx, id: unknown): Promise<ImportableTag> {
+  if (typeof id !== "string") throw new UserError("NotFound", "No such Tag");
+  await ensureTags(ctx);
+  const r = await ddb.send(new GetCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(id) } }));
+  if (!r.Item) throw new UserError("NotFound", "No such Tag");
+  return importableTag(r.Item);
+}
+
+// Names of Tags I deleted, one record each (`SK = DROPPED_TAG#<folded name>`), so an Import
+// doesn't re-create them. Keyed so names that sameTagName treats as equal share one record.
+const DROPPED_TAG_PREFIX = "DROPPED_TAG#";
+const droppedTagSk = (name: string) =>
+  DROPPED_TAG_PREFIX + name.trim().normalize("NFKD").replace(/\p{M}/gu, "").toLowerCase();
+
+async function droppedTagNames(ctx: Ctx): Promise<string[]> {
+  return (await queryPrefix(ctx, DROPPED_TAG_PREFIX)).map((r) => r.name as string);
 }
 
 async function tags(ctx: Ctx) {
@@ -817,20 +847,32 @@ async function addTag(ctx: Ctx, args: { name: string }) {
   return tag;
 }
 
+/** I rename a Tag. Its old name becomes an alias, so Imports bringing that name still land here. */
 async function renameTag(ctx: Ctx, args: { id: string; name: string }) {
-  const tag = await getTag(ctx, args.id);
+  const tag = await getTagRec(ctx, args.id);
   const name = validateTagName(args.name, await allTags(ctx), tag.id);
-  await ddb.send(
-    new UpdateCommand({
-      TableName: TABLE,
-      Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) },
-      UpdateExpression: "SET #n = :n",
-      ConditionExpression: "attribute_exists(PK)",
-      ExpressionAttributeNames: { "#n": "name" },
-      ExpressionAttributeValues: { ":n": name },
-    }),
-  );
-  return { ...tag, name };
+  const aliases = sameTagName(tag.name, name) ? tag.aliases : addTagNames(tag.aliases, tag.name);
+  await setTagAliases(ctx, tag, aliases, name);
+  return { id: tag.id, name };
+}
+
+/** Rewrite a Tag's name and aliases, only if nobody renamed it since `read`. */
+async function setTagAliases(ctx: Ctx, read: ImportableTag, aliases: string[], name = read.name) {
+  try {
+    await ddb.send(
+      new UpdateCommand({
+        TableName: TABLE,
+        Key: { PK: ownerPk(ctx), SK: tagSk(read.id) },
+        UpdateExpression: "SET #n = :n, aliases = :a",
+        ConditionExpression: "attribute_exists(PK) AND #n = :read",
+        ExpressionAttributeNames: { "#n": "name" },
+        ExpressionAttributeValues: { ":n": name, ":a": aliases, ":read": read.name },
+      }),
+    );
+  } catch (e) {
+    if ((e as Error).name === "ConditionalCheckFailedException") throw new UserError("Conflict", "The Tag changed while saving; reload and try again");
+    throw e;
+  }
 }
 
 /**
@@ -855,21 +897,34 @@ async function rewriteGamesMentioning(ctx: Ctx, tagId: string, change: (g: GameT
   }
 }
 
+/** I delete a Tag. Its names (current and aliases) are remembered so Imports don't re-create it. */
 async function deleteTag(ctx: Ctx, args: { id: string }) {
-  const tag = await getTag(ctx, args.id);
-  await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) } }));
+  const tag = await getTagRec(ctx, args.id);
+  const dropped = addTagNames([], tag.name, ...tag.aliases);
+  await ddb.send(
+    new TransactWriteCommand({
+      TransactItems: [
+        { Delete: { TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(tag.id) } } },
+        ...dropped.map((name) => ({ Put: { TableName: TABLE, Item: { PK: ownerPk(ctx), SK: droppedTagSk(name), name } } })),
+      ].slice(0, TRANSACT_MAX),
+    }),
+  );
   await rewriteGamesMentioning(ctx, tag.id, (g) => dropTag(g, tag.id));
   return tag.id;
 }
 
-/** Merge Tag `fromId` into `intoId`: its links move (deduped, Manual winning) and it's deleted. */
+/**
+ * Merge Tag `fromId` into `intoId`: its links move (deduped, Manual winning) and it's deleted.
+ * Its name and aliases become aliases of `intoId`, so Imports bringing them land there.
+ */
 async function mergeTags(ctx: Ctx, args: { fromId: string; intoId: string }) {
-  const from = await getTag(ctx, args.fromId);
-  const into = await getTag(ctx, args.intoId);
+  const from = await getTagRec(ctx, args.fromId);
+  const into = await getTagRec(ctx, args.intoId);
   if (from.id === into.id) throw new UserError("ValidationError", "Pick two different Tags to merge");
+  await setTagAliases(ctx, into, addTagNames(into.aliases, from.name, ...from.aliases));
   await ddb.send(new DeleteCommand({ TableName: TABLE, Key: { PK: ownerPk(ctx), SK: tagSk(from.id) } }));
   await rewriteGamesMentioning(ctx, from.id, (g) => moveTag(g, from.id, into.id));
-  return into;
+  return { id: into.id, name: into.name };
 }
 
 const tagState = (game: GameRec): GameTags => ({ tags: game.tags ?? [], removedTagIds: game.removedTagIds ?? [] });
