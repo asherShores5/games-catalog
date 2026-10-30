@@ -17,6 +17,8 @@ const run = `${QA}${Date.now().toString(36)}`;
 type Result = { name: string; ok: boolean; detail?: string };
 const results: Result[] = [];
 const problems: string[] = [];
+/** GraphQL errors a check provokes on purpose. */
+const expectedErrors: string[] = [];
 let shot = 0;
 
 async function check(page: Page, name: string, fn: () => Promise<string | void>) {
@@ -42,7 +44,7 @@ function watch(page: Page, label: string) {
     if (!r.url().includes("appsync-api")) return;
     if (r.status() >= 400) return void problems.push(`${label} GraphQL HTTP ${r.status()}`);
     const body = await r.json().catch(() => undefined);
-    for (const err of body?.errors ?? []) problems.push(`${label} GraphQL error: ${String(err.message).slice(0, 200)}`);
+    for (const err of body?.errors ?? []) if (!expectedErrors.some((x) => String(err.message).includes(x))) problems.push(`${label} GraphQL error: ${String(err.message).slice(0, 200)}`);
   });
 }
 
@@ -186,11 +188,14 @@ async function readOnly(page: Page) {
   });
 
   await check(page, "an Unknown Copy shows 'location unknown' with Fill in", async () => {
-    const row = rows(page).filter({ has: page.locator(".copy-summary", { hasText: "location unknown" }) }).first();
-    if (!(await row.count())) return "no Unknown Copies (skipped)";
+    const withUnknown = rows(page).filter({ has: page.locator(".copy-summary", { hasText: "location unknown" }) }).first();
+    if (!(await withUnknown.count())) return "no Unknown Copies (skipped)";
+    const name = (await withUnknown.locator("button.row > span:first-child").evaluate((s) => s.childNodes[0]?.textContent ?? "")).trim();
+    const row = rows(page).filter({ has: page.locator("button.row > span:first-child", { hasText: name }) }).first();
     await row.locator("button.row").click();
     await row.getByRole("button", { name: "Fill in" }).waitFor({ timeout: 5000 });
     await row.locator("button.row").click();
+    return name;
   });
 
   for (const screen of ["Platforms", "Accounts", "Tags"]) {
@@ -242,6 +247,7 @@ async function mobile(browser: Browser) {
 
 // ---------------------------------------------------------------------------------------------
 async function goTo(page: Page, screen: string) {
+  await home(page);
   await page.getByRole("button", { name: screen, exact: true }).click();
   await page.getByRole("heading", { name: screen }).waitFor();
 }
@@ -249,7 +255,15 @@ const back = async (page: Page) => {
   await page.getByRole("button", { name: "Back to Games" }).click();
   await page.getByRole("heading", { name: "Games", exact: true }).waitFor();
 };
-const listRow = (page: Page, name: string) => page.locator("ul.games > li.row").filter({ has: page.getByText(name, { exact: true }) });
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const label = (name: string) => new RegExp(`^(.+: )?${esc(name)}$`);
+const listRow = (page: Page, name: string) => page.locator("ul.games > li.row").filter({ has: page.locator(":scope > span:first-child", { hasText: label(name) }) });
+/** Back on the Games screen, wherever a failed check left the page. */
+async function home(page: Page) {
+  const backBtn = page.getByRole("button", { name: "Back to Games" });
+  if (await backBtn.isVisible()) await backBtn.click();
+  await page.getByRole("heading", { name: "Games", exact: true }).waitFor();
+}
 const noError = async (page: Page) => {
   await page.waitForTimeout(300);
   const err = page.locator("main > p.error");
@@ -294,6 +308,7 @@ async function writes(page: Page) {
     await goTo(page, "Platforms");
     const before = await page.locator("ul.games > li.row").count();
     const existing = (await page.locator("ul.games > li.row > span:first-child").first().innerText()).trim();
+    expectedErrors.push(`already a Platform called "${existing.toUpperCase()}"`);
     await page.getByPlaceholder("Add a Platform").fill(` ${existing.toUpperCase()} `);
     await page.getByRole("button", { name: "Add", exact: true }).click();
     await page.locator("main > p.error").waitFor({ timeout: 10_000 });
@@ -336,7 +351,7 @@ async function sweep(page: Page) {
   for (const screen of ["Platforms", "Accounts", "Tags"]) {
     await goTo(page, screen);
     for (;;) {
-      const row = page.locator("ul.games > li.row").filter({ hasText: new RegExp(`^${QA}`) }).first();
+      const row = page.locator("ul.games > li.row").filter({ has: page.locator(":scope > span:first-child", { hasText: new RegExp(`^(.+: )?${QA}`) }) }).first();
       if (!(await row.count())) break;
       const name = (await row.locator("span").first().innerText()).trim();
       await row.getByRole("button", { name: "Delete" }).click();
@@ -344,7 +359,7 @@ async function sweep(page: Page) {
       if (await page.locator("main > p.error").isVisible()) { left.push(`${screen}: ${name} (${await page.locator("main > p.error").innerText()})`); break; }
       results.push({ name: `swept leftover ${screen}: ${name}`, ok: true });
     }
-    await back(page);
+    await home(page);
   }
   const games = await page.locator("ul.games > li > button.row").filter({ hasText: new RegExp(`^${QA}`) }).count();
   if (games) left.push(`${games} QA Games (no delete in the app)`);
