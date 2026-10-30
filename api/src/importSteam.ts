@@ -13,6 +13,7 @@ import {
 import { UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { TABLE, accountSk, ddb, ownerPk, type Ctx } from "./db";
 import { accountOut, getAccountRec } from "./accounts";
+import { skippedSteamApps } from "./deleteGame";
 import { catalog, gameOut, newGameRec, nextUpdatedAt, saveGame, writeCopy, type GameRec, type GameWithCopies, type KnownCopy } from "./games";
 import { addPlatform, allPlatforms } from "./platforms";
 import { UserError, validateCopyAccount } from "./rules";
@@ -162,6 +163,10 @@ async function runImport(ctx: Ctx, steamId: string, accountId: string, started: 
     if (e instanceof SteamError) throw steamUserError(e);
     throw e;
   }
+
+  // Games I deleted stay deleted (deleteGame.ts).
+  const skipped = await skippedSteamApps(ctx);
+  library = library.filter((app) => !skipped.has(app.appId));
 
   const platform = await steamPlatform(ctx);
   const games = await catalog(ctx);

@@ -1,3 +1,4 @@
+import { isUnknownCopy } from "./copy";
 import { canWishlist, isOwned } from "./ownership";
 import type { Game, PlayStatus } from "./types";
 
@@ -30,9 +31,14 @@ export interface GameFilter {
   ownership?: Ownership;
   /** Keep Games with exactly this Play status. */
   playStatus?: PlayStatus;
+  /** Keep Games missing key info: an Unknown Copy (location), no Tags, or either (any). */
+  missing?: Missing;
   /** Keep Games that have every one of these Tags (AND), from any Tag source. Empty means unset. */
   tagIds?: string[];
 }
+
+export type Missing = "location" | "tags" | "any";
+export const MISSINGS: readonly Missing[] = ["location", "tags", "any"];
 
 export type Ownership = "owned" | "wishlist" | "all";
 export const OWNERSHIPS: readonly Ownership[] = ["owned", "wishlist", "all"];
@@ -63,5 +69,10 @@ export function gameMatches(game: FilterableGame, filter: GameFilter): boolean {
   if (!filter.ownership && onWishlist) return false;
   if (filter.playStatus && game.playStatus !== filter.playStatus) return false;
   if (filter.tagIds?.some((id) => !game.tags?.some((t) => t.tagId === id))) return false;
+  if (filter.missing) {
+    const noLocation = game.copies.some(isUnknownCopy);
+    const noTags = !game.tags?.length;
+    if (filter.missing === "location" ? !noLocation : filter.missing === "tags" ? !noTags : !(noLocation || noTags)) return false;
+  }
   return true;
 }

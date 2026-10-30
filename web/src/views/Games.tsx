@@ -10,6 +10,7 @@ import { Platforms } from "./Platforms";
 import type { Tag } from "@games/shared";
 import { listTags } from "../api";
 import { GameTags } from "./GameTags";
+import { DeleteGame } from "./DeleteGame";
 import { MergeGame } from "./MergeGame";
 import { Tags } from "./Tags";
 
@@ -127,6 +128,13 @@ export function Games() {
                   onMerged={(merged, goneId) => {
                     setGames((gs) => (gs ?? []).filter((x) => x.id !== goneId).map((x) => (x.id === merged.id ? merged : x)));
                     setOpenId(merged.id);
+                  }}
+                />
+                <DeleteGame
+                  game={g}
+                  onDeleted={(id) => {
+                    setGames((gs) => (gs ?? []).filter((x) => x.id !== id));
+                    setOpenId(undefined);
                   }}
                 />
               </>

@@ -22,7 +22,7 @@
 
 **Play status**: Playing, Backlog, Finished, or none. Independent of ownership.
 
-**Tag**: A descriptor of a Game (co-op, single-player, versus, narrative, open-world, platformer…). One shared list, whether a Tag came from an Import or was added by hand.
+**Tag**: A descriptor of a Game. One shared, short list of broad Tags that help pick what to play alone or together: Single-player, Multiplayer, Co-op, Couch co-op, Online, Offline, Versus, Controller, then genres (Action, Adventure, RPG, Strategy, Simulation, Casual, Racing, Sports). Imports bring only these; anything else Steam lists is dropped. Tags can still be added by hand.
 
 **Tag source**: Whether a Game's Tag came from an Import or from Asher: Import or Manual. Manual choices beat Imports.
 
@@ -35,3 +35,7 @@
 **Seed**: The one-time load of the Notion "Gaming catalog" page.
 
 **Merge**: Folding one Game into another that is really the same title. Copies and Tags combine, the other Game is deleted, and its Steam app ID still matches the kept Game in later Imports. An Unknown Copy is dropped once the other Game shows where the title is.
+
+**Missing info**: A Game with an Unknown Copy (no location) or with no Tags. A filter finds them so they can be filled in.
+
+**Delete (a Game)**: Removes the Game and its Copies. A Steam Game stays out of later Imports (its Steam app IDs are remembered); adding it again by hand still works.

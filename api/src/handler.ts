@@ -5,6 +5,7 @@ import type { AppSyncIdentityCognito, AppSyncResolverEvent } from "aws-lambda";
 import type { Ctx } from "./db";
 import { addAccount, allAccounts, deleteAccount, renameAccount, setSteamId } from "./accounts";
 import { addCopy, addGame, allGames, fillUnknownCopy, removeCopy, setPlayStatus, setWishlist } from "./games";
+import { deleteGame } from "./deleteGame";
 import { importSteam } from "./importSteam";
 import { mergeGames } from "./mergeGames";
 import { addPlatform, allPlatforms, deletePlatform, renamePlatform } from "./platforms";
@@ -21,7 +22,7 @@ const RESOLVERS: Record<string, (ctx: Ctx, args: any) => Promise<unknown>> = {
   platforms: allPlatforms, addPlatform, renamePlatform, deletePlatform,
   accounts: allAccounts, addAccount, renameAccount, deleteAccount, setSteamId, importSteam,
   tags: allTags, addTag, renameTag, deleteTag, mergeTags, addGameTag, removeGameTag,
-  mergeGames,
+  mergeGames, deleteGame,
 };
 
 export async function handler(event: AppSyncResolverEvent<Record<string, unknown>>) {
