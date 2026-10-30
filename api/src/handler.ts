@@ -608,7 +608,8 @@ async function applyStep(
   if (step.kind === "present") {
     // Nothing to add. A manual Game matched by name still learns its Steam app ID, so later
     // Imports find it by ID. Store Tags (if looked up) land in the same write.
-    if (step.link || storeTagIds) await saveGame(ctx, read, withStoreTags({ ...read, steamAppId, updatedAt: nextUpdatedAt(read) }));
+    // A repeat step (a merged Game's second app ID) never writes: the Game's first step does.
+    if (!step.repeat && (step.link || storeTagIds)) await saveGame(ctx, read, withStoreTags({ ...read, steamAppId, updatedAt: nextUpdatedAt(read) }));
     return { outcome: "present", gameId: read.id, name: read.name };
   }
   if (step.kind === "fillUnknown") {
@@ -702,6 +703,8 @@ function storeTagCandidates(steps: ImportStep[], games: Map<string, { game: Game
   const now = Date.now();
   return steps
     .filter((step) => {
+      // A merged Game's later app IDs never write it (only the first step may), so it gets one lookup.
+      if (step.kind === "present" && step.repeat) return false;
       const at = lastLookup(step);
       return at === undefined || now - at >= STORE_TAGS_REFRESH_MS;
     })

@@ -285,6 +285,21 @@ describe("Steam Tag Import: my Tag edits stick", () => {
     expect((await gameTags()).Hades).toEqual(["Indie/Import"]);
   });
 
+  it("a merged Game with two Steam app IDs re-imports cleanly when its store Tags are due", async () => {
+    const steam = await steamAccount();
+    const HADES_DEMO = { appId: 1145350, name: "Hades Demo" };
+    h.steam.set(STEAM_ID, [HADES, HADES_DEMO]);
+    h.steam.setDetails(HADES.appId, { categories: [], genres: ["Action"] });
+    h.steam.setDetails(HADES_DEMO.appId, { categories: [], genres: ["Indie"] });
+    await importSteam(steam.id);
+    const games = await h.call(h.owner, "games");
+    const id = (name: string) => games.find((g: { name: string }) => g.name === name).id;
+    await h.call(h.owner, "mergeGames", { fromId: id("Hades Demo"), intoId: id("Hades") });
+
+    expect(await refresh(steam.id)).toMatchObject({ alreadyPresent: 2, failed: 0 });
+    expect(Object.keys(await gameTags())).toEqual(["Hades"]);
+  });
+
   it("the Steam names behind a Tag stay private", async () => {
     await h.call(h.owner, "renameTag", { id: await tagId("co-op"), name: "Co-operative" });
     for (const t of await h.call(h.owner, "tags")) expect(Object.keys(t).sort()).toEqual(["id", "name"]);
