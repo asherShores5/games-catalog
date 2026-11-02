@@ -44,7 +44,7 @@ function watch(page: Page, label: string) {
     if (!r.url().includes("appsync-api")) return;
     if (r.status() >= 400) return void problems.push(`${label} GraphQL HTTP ${r.status()}`);
     const body = await r.json().catch(() => undefined);
-    for (const err of body?.errors ?? []) if (!expectedErrors.some((x) => String(err.message).includes(x))) problems.push(`${label} GraphQL error: ${String(err.message).slice(0, 200)}`);
+    for (const err of body?.errors ?? []) if (!expectedErrors.some((x) => String(err.message).toLowerCase().includes(x.toLowerCase()))) problems.push(`${label} GraphQL error: ${String(err.message).slice(0, 200)}`);
   });
 }
 
