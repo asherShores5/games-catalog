@@ -39,3 +39,7 @@
 **Missing info**: A Game with an Unknown Copy (no location) or with no Tags. A filter finds them so they can be filled in.
 
 **Delete (a Game)**: Removes the Game and its Copies. A Steam Game stays out of later Imports (its Steam app IDs are remembered); adding it again by hand still works.
+
+**Place**: Where I play (Couch, Game room), as a list of Platforms. A Platform can be in several Places, and a Platform that plays another's Games (Wii for GameCube, Switch 2 for Switch) is handled by putting both in the Place. The Place filter shows Games with a Copy on any Platform in it.
+
+**Search**: Matches the whole query in a Game's name, or else every word of it in the name or one of the Game's Tag names ("co-op rpg", "couch co-op").

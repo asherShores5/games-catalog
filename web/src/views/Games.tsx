@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import { accountLabel, byName, cleanGameName, withoutUnknownTags, type Account, type CopyNames, type Game, type Platform } from "@games/shared";
-import { addGame, listAccounts, listGames, listPlatforms } from "../api";
+import { accountLabel, byName, cleanGameName, withoutUnknownTags, type Account, type CopyNames, type Game, type Place, type Platform } from "@games/shared";
+import { addGame, listAccounts, listGames, listPlaces, listPlatforms } from "../api";
 import { signOut } from "../auth";
 import { Accounts } from "./Accounts";
 import { FilterBar, useUrlFilter } from "./FilterBar";
 import { GameDetail } from "./GameDetail";
 import { GameList } from "./GameList";
+import { Places } from "./Places";
 import { Platforms } from "./Platforms";
 import type { Tag } from "@games/shared";
 import { listTags } from "../api";
@@ -23,6 +24,8 @@ export function Games() {
   const [error, setError] = useState<string>();
   const [openId, setOpenId] = useState<string>();
   const [showPlatforms, setShowPlatforms] = useState(false);
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [showPlaces, setShowPlaces] = useState(false);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [showAccounts, setShowAccounts] = useState(false);
   const [filter, setFilter] = useUrlFilter();
@@ -52,6 +55,7 @@ export function Games() {
     listGames().then(setGames, (e) => setError(String(e.message ?? e)));
     listPlatforms().then(setPlatforms, (e) => setError(String(e.message ?? e)));
     listAccounts().then(setAccounts, (e) => setError(String(e.message ?? e)));
+    listPlaces().then(setPlaces, (e) => setError(String(e.message ?? e)));
   }, []);
 
   const replace = (game: Game) => setGames((gs) => (gs ?? []).map((g) => (g.id === game.id ? game : g)));
@@ -73,6 +77,9 @@ export function Games() {
     }
   }
 
+  if (showPlaces) {
+    return <Places places={places} platforms={platforms} onChange={setPlaces} onClose={() => setShowPlaces(false)} />;
+  }
   if (showPlatforms) {
     return <Platforms platforms={platforms} onChange={setPlatforms} onClose={() => setShowPlatforms(false)} />;
   }
@@ -93,6 +100,7 @@ export function Games() {
       <header>
         <h1>Games</h1>
         <nav>
+          <button className="link" onClick={() => setShowPlaces(true)}>Places</button>
           <button className="link" onClick={() => setShowPlatforms(true)}>Platforms</button>
           <button className="link" onClick={() => setShowAccounts(true)}>Accounts</button>
           <button className="link" onClick={() => setShowTags(true)}>Tags</button>
@@ -108,10 +116,11 @@ export function Games() {
         <p>Loading…</p>
       ) : (
         <>
-          <FilterBar filter={filter} onChange={setFilter} platforms={platforms} tags={tags} />
+          <FilterBar filter={filter} onChange={setFilter} platforms={platforms} places={places} tags={tags} />
           <GameList
             games={games}
             filter={filter}
+            lookups={{ places, tagName: (id) => tags.find((t) => t.id === id)?.name }}
             names={copyNames(platforms, accounts)}
             tagName={(id) => tags.find((t) => t.id === id)?.name}
             openId={openId}

@@ -120,6 +120,9 @@ export class AppStack extends Stack {
     // Merge Games (ticket 09).
     ds.createResolver("MmergeGames", { typeName: "Mutation", fieldName: "mergeGames" });
     ds.createResolver("MdeleteGame", { typeName: "Mutation", fieldName: "deleteGame" });
+    // Places.
+    ds.createResolver("Qplaces", { typeName: "Query", fieldName: "places" });
+    for (const field of ["addPlace", "renamePlace", "setPlacePlatforms", "deletePlace"]) ds.createResolver(`M${field}`, { typeName: "Mutation", fieldName: field });
 
     // The web app's /config.json takes these values (see web/public/config.example.json).
     // ---- cost guardrail: everything here is tagged app=games-catalog (bin/app.ts) ----

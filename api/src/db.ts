@@ -143,6 +143,7 @@ export const isCopyRec = (rec: Rec) => String(rec.SK).includes("#COPY#");
 export const platformSk = (id: string) => `PLATFORM#${id}`;
 export const accountSk = (id: string) => `ACCOUNT#${id}`;
 export const tagSk = (id: string) => `TAG#${id}`;
+export const placeSk = (id: string) => `PLACE#${id}`;
 /** DynamoDB's TransactWrite item limit. */
 export const TRANSACT_MAX = 100;
 
