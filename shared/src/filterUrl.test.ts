@@ -25,6 +25,11 @@ describe("filter in the URL", () => {
     expect(filterFromUrl("?tag=&tag=a&tag=a")).toEqual({ tagIds: ["a"] });
   });
 
+  it("keeps the Place as place=", () => {
+    expect(filterToUrl({ placeId: "couch-1" })).toBe("place=couch-1");
+    expect(filterFromUrl("?place=couch-1&q=x")).toEqual({ placeId: "couch-1", query: "x" });
+  });
+
   it("keeps the Missing info choice as missing=", () => {
     expect(filterToUrl({ missing: "tags" })).toBe("missing=tags");
     for (const missing of ["location", "tags", "any"] as const) expect(filterFromUrl(filterToUrl({ missing }))).toEqual({ missing });

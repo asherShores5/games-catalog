@@ -210,3 +210,63 @@ describe("Missing info filter", () => {
     expect(names({ missing: "any" })).toEqual(["Nowhere", "Untagged", "Both"]);
   });
 });
+
+describe("Place filter", () => {
+  const copy = (platformId: string) => ({ id: platformId, platformId, format: "Digital" as const, createdAt: 1 });
+  const g = (name: string, platforms: string[]) => ({ name, copies: platforms.map(copy), wishlist: false, playStatus: null });
+  const games = [g("Halo", ["xsx"]), g("Zelda", ["switch2"]), g("Portal 2", ["pc"]), g("Hades", ["pc", "switch2"]), g("Boxed", [])];
+  const places = [
+    { id: "couch", name: "Couch", platformIds: ["xsx", "switch2", "wii"] },
+    { id: "room", name: "Game room", platformIds: ["pc"] },
+  ];
+  const names = (filter: Parameters<typeof gameMatches>[1]) =>
+    games.filter((x) => gameMatches(x, filter, { places })).map((x) => x.name);
+
+  it("keeps Games with a Copy on any Platform in the Place", () => {
+    expect(names({ placeId: "couch" })).toEqual(["Halo", "Zelda", "Hades"]);
+    expect(names({ placeId: "room" })).toEqual(["Portal 2", "Hades"]);
+  });
+
+  it("combines with the Platform filter and search", () => {
+    expect(names({ placeId: "couch", query: "ha" })).toEqual(["Halo", "Hades"]);
+    expect(names({ placeId: "room", platformId: "switch2" })).toEqual(["Hades"]);
+  });
+
+  it("an unknown Place (deleted since the link was made) filters nothing out", () => {
+    expect(names({ placeId: "gone" })).toEqual(["Halo", "Zelda", "Portal 2", "Hades", "Boxed"]);
+  });
+});
+
+describe("search also matches Tag names", () => {
+  const tagNames: Record<string, string> = { coop: "Co-op", couch: "Couch co-op", rpg: "RPG", single: "Single-player" };
+  const tagName = (id: string) => tagNames[id];
+  const g = (name: string, tagIds: string[]) =>
+    ({ name, copies: [], wishlist: false, playStatus: null, tags: tagIds.map((tagId) => ({ tagId, source: "Import" as const })) });
+  const games = [
+    g("It Takes Two", ["coop", "couch"]),
+    g("Valheim", ["coop", "rpg"]),
+    g("Elden Ring", ["rpg", "single"]),
+    g("Coop Adventure", []),
+  ];
+  const names = (query: string) => games.filter((x) => gameMatches(x, { query }, { tagName })).map((x) => x.name);
+
+  it("a query naming a Tag finds the Games with it", () => {
+    expect(names("rpg")).toEqual(["Valheim", "Elden Ring"]);
+    expect(names("couch co-op")).toEqual(["It Takes Two"]);
+  });
+
+  it("several words: each must match the name or one of the Tags (AND)", () => {
+    expect(names("co-op rpg")).toEqual(["Valheim"]);
+    expect(names("rpg ring")).toEqual(["Elden Ring"]);
+  });
+
+  it("names still match as before, with or without spaces and punctuation", () => {
+    expect(names("eldenring")).toEqual(["Elden Ring"]);
+    expect(names("it takes")).toEqual(["It Takes Two"]);
+    expect(names("coop")).toEqual(["It Takes Two", "Valheim", "Coop Adventure"]);
+  });
+
+  it("without Tag names to look at, only names match", () => {
+    expect(games.filter((x) => gameMatches(x, { query: "rpg" })).map((x) => x.name)).toEqual([]);
+  });
+});

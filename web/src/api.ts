@@ -1,4 +1,4 @@
-import type { Account, Format, Game, Platform, PlayStatus, SteamImportSummary, Store, Tag } from "@games/shared";
+import type { Account, Format, Game, Place, Platform, PlayStatus, SteamImportSummary, Store, Tag } from "@games/shared";
 import { freshTokens } from "./auth";
 import { getConfig } from "./config";
 
@@ -6,6 +6,7 @@ const COPY = `id platformId format accountId edition createdAt`;
 const GAME = `id name copies { ${COPY} } owned wishlist playStatus tags { tagId source } steamAppId createdAt updatedAt`;
 const TAG = `id name`;
 const PLATFORM = `id name`;
+const PLACE = `id name platformIds`;
 const ACCOUNT = `id store nickname hasSteamId`;
 
 export const Q = {
@@ -38,6 +39,11 @@ export const Q = {
   // Two forms: leaving playStatus out means "keep the more advanced one"; null means none.
   mergeGames: `mutation($fromId: ID!, $intoId: ID!) { mergeGames(fromId: $fromId, intoId: $intoId) { ${GAME} } }`,
   deleteGame: `mutation($id: ID!) { deleteGame(id: $id) }`,
+  places: `query { places { ${PLACE} } }`,
+  addPlace: `mutation($name: String!) { addPlace(name: $name) { ${PLACE} } }`,
+  renamePlace: `mutation($id: ID!, $name: String!) { renamePlace(id: $id, name: $name) { ${PLACE} } }`,
+  setPlacePlatforms: `mutation($id: ID!, $platformIds: [ID!]!) { setPlacePlatforms(id: $id, platformIds: $platformIds) { ${PLACE} } }`,
+  deletePlace: `mutation($id: ID!) { deletePlace(id: $id) }`,
   mergeGamesWithStatus: `mutation($fromId: ID!, $intoId: ID!, $playStatus: PlayStatus) {
     mergeGames(fromId: $fromId, intoId: $intoId, playStatus: $playStatus) { ${GAME} } }`,
 };
@@ -122,3 +128,10 @@ export const mergeGames = async (fromId: string, intoId: string, choice?: { play
   );
 
 export const deleteGame = async (id: string) => (await gql<{ deleteGame: string }>(Q.deleteGame, { id })).deleteGame;
+
+export const listPlaces = async () => (await gql<{ places: Place[] }>(Q.places)).places;
+export const addPlace = async (name: string) => (await gql<{ addPlace: Place }>(Q.addPlace, { name })).addPlace;
+export const renamePlace = async (id: string, name: string) => (await gql<{ renamePlace: Place }>(Q.renamePlace, { id, name })).renamePlace;
+export const setPlacePlatforms = async (id: string, platformIds: string[]) =>
+  (await gql<{ setPlacePlatforms: Place }>(Q.setPlacePlatforms, { id, platformIds })).setPlacePlatforms;
+export const deletePlace = async (id: string) => (await gql<{ deletePlace: string }>(Q.deletePlace, { id })).deletePlace;

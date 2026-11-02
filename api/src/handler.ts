@@ -7,6 +7,7 @@ import { addAccount, allAccounts, deleteAccount, renameAccount, setSteamId } fro
 import { addCopy, addGame, allGames, fillUnknownCopy, removeCopy, setPlayStatus, setWishlist } from "./games";
 import { deleteGame } from "./deleteGame";
 import { importSteam } from "./importSteam";
+import { addPlace, allPlaces, deletePlace, renamePlace, setPlacePlatforms } from "./places";
 import { mergeGames } from "./mergeGames";
 import { addPlatform, allPlatforms, deletePlatform, renamePlatform } from "./platforms";
 import { UserError } from "./rules";
@@ -23,6 +24,7 @@ const RESOLVERS: Record<string, (ctx: Ctx, args: any) => Promise<unknown>> = {
   accounts: allAccounts, addAccount, renameAccount, deleteAccount, setSteamId, importSteam,
   tags: allTags, addTag, renameTag, deleteTag, mergeTags, addGameTag, removeGameTag,
   mergeGames, deleteGame,
+  places: allPlaces, addPlace, renamePlace, setPlacePlatforms, deletePlace,
 };
 
 export async function handler(event: AppSyncResolverEvent<Record<string, unknown>>) {

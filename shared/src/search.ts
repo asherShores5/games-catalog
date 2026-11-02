@@ -1,4 +1,5 @@
 import { isUnknownCopy } from "./copy";
+import type { Place } from "./place";
 import { canWishlist, isOwned } from "./ownership";
 import type { Game, PlayStatus } from "./types";
 
@@ -24,6 +25,8 @@ export interface GameFilter {
   query?: string;
   /** Keep Games with at least one Copy on this Platform. */
   platformId?: string;
+  /** Keep Games with at least one Copy on a Platform in this Place. An unknown Place filters nothing. */
+  placeId?: string;
   /**
    * Unset: everything but the Wishlist (the default view). Owned: has a Copy. Wishlist: on the
    * Wishlist and no Copy. All: everything, Wishlist included.
@@ -59,9 +62,30 @@ export function withoutUnknownTags(filter: GameFilter, tags: readonly { id: stri
 /** The parts of a Game the list filter looks at. Missing `tags` reads as none. */
 export type FilterableGame = Pick<Game, "name" | "copies" | "wishlist" | "playStatus"> & Partial<Pick<Game, "tags">>;
 
+/** What the filter needs besides the Game: the Places, and Tag names for search. */
+export interface FilterLookups {
+  places?: readonly Place[];
+  tagName?: (id: string) => string | undefined;
+}
+
+/**
+ * Search: the whole query in the name (as always), or else every word of it in the name or in
+ * one of the Game's Tag names. So "co-op rpg" finds Games tagged both, and "rpg ring" Elden Ring.
+ */
+export function matchesSearch(game: Pick<FilterableGame, "name" | "tags">, query: string, tagName?: (id: string) => string | undefined): boolean {
+  if (matchesName(game.name, query)) return true;
+  const words = query.split(/\s+/).map(searchKey).filter(Boolean);
+  if (words.length === 0) return true;
+  const name = searchKey(game.name);
+  const tags = (game.tags ?? []).map((t) => tagName?.(t.tagId)).filter((n): n is string => !!n).map(searchKey);
+  return words.every((w) => name.includes(w) || tags.some((t) => t.includes(w)));
+}
+
 /** True when the Game belongs in the list under this filter (every set field must match). */
-export function gameMatches(game: FilterableGame, filter: GameFilter): boolean {
-  if (!matchesName(game.name, filter.query ?? "")) return false;
+export function gameMatches(game: FilterableGame, filter: GameFilter, lookups: FilterLookups = {}): boolean {
+  if (!matchesSearch(game, filter.query ?? "", lookups.tagName)) return false;
+  const place = filter.placeId ? lookups.places?.find((p) => p.id === filter.placeId) : undefined;
+  if (place && !game.copies.some((c) => c.platformId !== undefined && place.platformIds.includes(c.platformId))) return false;
   if (filter.platformId && !game.copies.some((c) => c.platformId === filter.platformId)) return false;
   if (filter.ownership === "owned" && !isOwned(game.copies)) return false;
   const onWishlist = game.wishlist && canWishlist(game.copies);

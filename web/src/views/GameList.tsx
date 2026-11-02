@@ -1,12 +1,14 @@
 import type { ReactNode } from "react";
-import { canWishlist, copyParts, gameMatches, type CopyNames, type Game, type GameFilter } from "@games/shared";
+import { canWishlist, copyParts, gameMatches, type CopyNames, type FilterLookups, type Game, type GameFilter } from "@games/shared";
 
 /**
  * The Game list narrowed by a filter (client-side, re-run on every keystroke). Each row shows
  * every Copy (Platform, Format, Account, Edition); clicking a row opens it via renderDetail.
  */
-export function GameList({ games, filter, names, openId, onToggle, renderDetail, tagName }: {
+export function GameList({ games, filter, lookups, names, openId, onToggle, renderDetail, tagName }: {
   games: Game[];
+  /** Places and Tag names the filter and search look at. */
+  lookups?: FilterLookups;
   /** Tag id to name; Tags it doesn't know aren't shown. */
   tagName?: (id: string) => string | undefined;
   filter: GameFilter;
@@ -16,7 +18,7 @@ export function GameList({ games, filter, names, openId, onToggle, renderDetail,
   renderDetail: (game: Game) => ReactNode;
 }) {
   if (games.length === 0) return <p className="empty">No Games yet.</p>;
-  const shown = games.filter((g) => gameMatches(g, filter));
+  const shown = games.filter((g) => gameMatches(g, filter, lookups));
   if (shown.length === 0) return <p className="empty">No Games match.</p>;
 
   return (
