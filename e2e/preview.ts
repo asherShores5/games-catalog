@@ -22,6 +22,10 @@ const platforms = [
   { id: "pc", name: "PC" }, { id: "ps5", name: "PS5" }, { id: "switch", name: "Switch" }, { id: "xsx", name: "Xbox Series X" },
 ];
 const accounts = [{ id: "steam", store: "Steam", nickname: "main", hasSteamId: true }, { id: "psn", store: "PSN", nickname: "main", hasSteamId: false }];
+const places = [
+  { id: "couch", name: "Couch", platformIds: ["ps5", "switch", "xsx"] },
+  { id: "room", name: "Game room", platformIds: ["pc"] },
+];
 const tags = [
   { id: "coop", name: "Co-op" }, { id: "single", name: "Single-player" }, { id: "rpg", name: "RPG" },
   { id: "roguelike", name: "Roguelike" }, { id: "open", name: "Open world" }, { id: "remote", name: "Remote Play Together" },
@@ -66,7 +70,7 @@ async function serve(page: Page, signedIn: boolean) {
   });
   await page.route(GRAPHQL, async (route) => {
     const { query } = route.request().postDataJSON() as { query: string };
-    const data = query.includes("games {") ? { games } : query.includes("platforms {") ? { platforms }
+    const data = query.includes("games {") ? { games } : query.includes("platforms {") ? { platforms } : query.includes("places {") ? { places }
       : query.includes("accounts {") ? { accounts } : query.includes("tags {") ? { tags } : {};
     return route.fulfill({ json: { data } });
   });
@@ -105,13 +109,15 @@ async function shoot(context: BrowserContextOptions, label: string) {
   await signed.locator(".detail").first().waitFor();
   await snap2("3-open");
   await signed.locator("ul.games > li").filter({ hasText: "Elden Ring" }).locator("button.row").click();
-  await signed.getByLabel("Search Games").fill("ha");
-  await signed.getByLabel("Add a Tag filter").selectOption({ label: "Roguelike" });
+  await signed.getByLabel("Place").selectOption({ label: "Couch" });
+  await signed.locator(".tag-filter summary").click();
+  await signed.getByRole("group", { name: "Tag filter" }).getByRole("button", { name: "Co-op" }).click();
+  await signed.getByRole("group", { name: "Tag filter" }).getByRole("button", { name: "Single-player" }).click();
   await signed.getByLabel("Wishlist or Owned").selectOption("all");
   await snap2("4-filtered");
-  await signed.getByRole("button", { name: "Tags", exact: true }).click();
-  await signed.getByRole("heading", { name: "Tags" }).waitFor();
-  await snap2("5-tags");
+  await signed.getByRole("button", { name: "Places", exact: true }).click();
+  await signed.getByRole("heading", { name: "Places" }).waitFor();
+  await snap2("5-places");
   await browser.close();
   if (errors.length) console.log(`${label} page errors:\n  ${errors.join("\n  ")}`);
 }

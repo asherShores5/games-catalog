@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { byName, filterFromUrl, filterToUrl, PLAY_STATUSES, type GameFilter, type Missing, type Ownership, type Platform, type PlayStatus, type Tag } from "@games/shared";
+import { byName, filterFromUrl, filterToUrl, PLAY_STATUSES, type GameFilter, type Missing, type Ownership, type Place, type Platform, type PlayStatus, type Tag } from "@games/shared";
 
 /** The list filter, kept in the page URL (replaceState, so typing doesn't pile up history entries). */
 export function useUrlFilter(): [GameFilter, (filter: GameFilter) => void] {
@@ -12,23 +12,37 @@ export function useUrlFilter(): [GameFilter, (filter: GameFilter) => void] {
   return [filter, setFilter];
 }
 
-/** Search box plus Platform, Wishlist / Owned, Play status, Missing info and Tag filters. All combine (AND). */
-export function FilterBar({ filter, onChange, platforms, tags = [] }: {
+/**
+ * Search box (names and Tag names) plus Place, Platform, Wishlist / Owned, Play status, Missing
+ * info and Tag filters. All combine (AND); picked Tags must all be on a Game.
+ */
+export function FilterBar({ filter, onChange, platforms, places = [], tags = [] }: {
   filter: GameFilter;
   onChange: (filter: GameFilter) => void;
   platforms: Platform[];
+  places?: Place[];
   tags?: Tag[];
 }) {
   const set = (patch: Partial<GameFilter>) => onChange(drop({ ...filter, ...patch }));
   const selectedTags = filter.tagIds ?? [];
   const tagName = (id: string) => tags.find((t) => t.id === id)?.name ?? "Unknown Tag";
+  const toggleTag = (id: string) =>
+    set({ tagIds: selectedTags.includes(id) ? selectedTags.filter((x) => x !== id) : [...selectedTags, id] });
+  const knownPlace = !filter.placeId || places.some((p) => p.id === filter.placeId);
   const knownPlatform = !filter.platformId || platforms.some((p) => p.id === filter.platformId);
   const anySet = filterToUrl(filter) !== "";
 
   return (
     <div className="filters">
-      <input type="search" className="search" placeholder="Search Games" aria-label="Search Games" value={filter.query ?? ""} onChange={(e) => set({ query: e.target.value })} />
+      <input type="search" className="search" placeholder="Search names and Tags" aria-label="Search Games" value={filter.query ?? ""} onChange={(e) => set({ query: e.target.value })} />
       <div className="filter-row">
+        {places.length > 0 && (
+          <select aria-label="Place" value={filter.placeId ?? ""} onChange={(e) => set({ placeId: e.target.value })}>
+            <option value="">Anywhere</option>
+            {places.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+            {!knownPlace && <option value={filter.placeId}>Unknown Place</option>}
+          </select>
+        )}
         <select aria-label="Platform" value={filter.platformId ?? ""} onChange={(e) => set({ platformId: e.target.value })}>
           <option value="">Any Platform</option>
           {[...platforms].sort(byName).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -50,19 +64,23 @@ export function FilterBar({ filter, onChange, platforms, tags = [] }: {
           <option value="tags">No Tags</option>
           <option value="any">Missing either</option>
         </select>
-        {/* Tags: every selected Tag must be on the Game (AND). Picking one adds it; × removes it. */}
-        <select aria-label="Add a Tag filter" value="" onChange={(e) => e.target.value && set({ tagIds: [...selectedTags, e.target.value] })}>
-          <option value="">{selectedTags.length ? "and Tag…" : "Any Tags"}</option>
-          {tags.filter((t) => !selectedTags.includes(t.id)).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
-        </select>
-        {selectedTags.map((id) => (
-          <span key={id} className="badge">
-            {tagName(id)}{" "}
-            <button className="link" aria-label={`Stop filtering by ${tagName(id)}`} onClick={() => set({ tagIds: selectedTags.filter((x) => x !== id) })}>×</button>
-          </span>
-        ))}
-        {anySet &&<button className="link" onClick={() => onChange({})}>Clear all</button>}
+        {anySet && <button className="link" onClick={() => onChange({})}>Clear all</button>}
       </div>
+      {tags.length > 0 && (
+        <details className="tag-filter" open={selectedTags.length > 0 || undefined}>
+          <summary>
+            Tags{selectedTags.length > 0 && <span className="count"> · {selectedTags.length} picked, Games with all of them</span>}
+          </summary>
+          <div className="chips" role="group" aria-label="Tag filter">
+            {tags.map((t) => {
+              const on = selectedTags.includes(t.id);
+              return (
+                <button key={t.id} className={on ? "chip on" : "chip"} aria-pressed={on} onClick={() => toggleTag(t.id)}>{t.name}</button>
+              );
+            })}
+          </div>
+        </details>
+      )}
     </div>
   );
 }

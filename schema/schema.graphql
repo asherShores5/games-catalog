@@ -17,6 +17,13 @@ enum PlayStatus {
 }
 
 "The hardware a Copy runs on (PC, PS5, Switch...). An editable list."
+"Where I play: a name and the Platforms there (Couch: Xbox, Switch 2…). A Platform can be in several Places."
+type Place {
+  id: ID!
+  name: String!
+  platformIds: [ID!]!
+}
+
 type Platform {
   id: ID!
   name: String!
@@ -110,6 +117,7 @@ type Query {
   games: [Game!]!
   "The owner's Platforms in name order, seeded with common ones on first use."
   platforms: [Platform!]!
+  places: [Place!]!
   "The owner's Accounts, ordered by Store: nickname."
   accounts: [Account!]!
   "The owner's Tags in name order, seeded with common ones on first use."
@@ -162,6 +170,14 @@ type Mutation {
 
   "Merge Game fromId into intoId: Copies and Tags combine, Owned if either was, Wishlist clears if Owned, Steam app IDs carry over, and fromId is deleted. Play status is the more advanced (Playing > Finished > Backlog > none) unless given (null = none)."
   mergeGames(fromId: ID!, intoId: ID!, playStatus: PlayStatus): Game!
+
+  "Add a Place (trimmed, 1-50 characters, unique ignoring case), with no Platforms yet."
+  addPlace(name: String!): Place!
+  renamePlace(id: ID!, name: String!): Place!
+  "Replace a Place's Platforms (each must be one of mine; duplicates dropped)."
+  setPlacePlatforms(id: ID!, platformIds: [ID!]!): Place!
+  "Delete a Place (its Platforms and Games are untouched). Returns its id."
+  deletePlace(id: ID!): ID!
 
   "Delete a Game and its Copies. Returns its id. A Steam Game stays out of later Imports."
   deleteGame(id: ID!): ID!

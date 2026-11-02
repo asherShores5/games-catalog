@@ -127,6 +127,24 @@ input.search {
 .filter-row .badge { display: inline-flex; align-items: center; gap: 0.15rem; padding-right: 0.2rem; background: var(--accent-soft); color: var(--accent); }
 .filter-row .badge button.link { padding: 0; font-size: 1rem; line-height: 1; }
 
+/* ---- chips: tap to pick (Tag filter, a Place's Platforms) ---- */
+.chips { display: flex; flex-wrap: wrap; gap: 0.35rem; padding-top: 0.5rem; }
+button.chip {
+  min-height: 2rem;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  font-size: 0.88rem;
+}
+button.chip.on { border-color: var(--accent); background: var(--accent); color: #fff; font-weight: 600; }
+.tag-filter { margin-top: 0.5rem; }
+.tag-filter summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 0.3rem 0; list-style-position: inside; }
+.tag-filter summary .count { color: var(--accent); }
+.games > li.place { padding: 0.55rem 0.9rem 0.8rem; }
+.games > li.place > div { padding: 0; background: none; }
+.place-name { font-weight: 600; }
+
 /* ---- lists ---- */
 .games {
   list-style: none;

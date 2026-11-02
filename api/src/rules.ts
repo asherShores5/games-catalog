@@ -3,8 +3,7 @@
 import {
   ACCOUNT_NICKNAME_MAX, EDITION_MAX, FORMATS, GAME_NAME_MAX, PLATFORM_NAME_MAX, PLAY_STATUSES, STORES,
   accountLabel, cleanAccountNickname, cleanSteamId, needsAccount, cleanEdition, cleanGameName, cleanPlatformName, sameAccount, samePlatformName,
-  type Account, type Format, type PlayStatus, type Store,
-} from "@games/shared";
+  type Account, type Format, type PlayStatus, type Store, PLACE_NAME_MAX, cleanPlaceName, samePlaceName } from "@games/shared";
 import { TAG_NAME_MAX, cleanTagName, sameTagName } from "@games/shared";
 
 /** An error the caller caused. The client sees "<type>: <message>"; anything else is InternalError. */
@@ -41,6 +40,9 @@ function uniqueName(
 
 /** A new or renamed Platform name: valid, and not another Platform's name (case-insensitive). */
 export const validatePlatformName = uniqueName("Platform", PLATFORM_NAME_MAX, cleanPlatformName, samePlatformName);
+
+/** A new or renamed Place name: valid, and not another Place's name (case-insensitive). */
+export const validatePlaceName = uniqueName("Place", PLACE_NAME_MAX, cleanPlaceName, samePlaceName);
 
 /** A new or renamed Tag name: valid, and not another Tag's name (case- and accent-insensitive). */
 export const validateTagName = uniqueName("Tag", TAG_NAME_MAX, cleanTagName, sameTagName);

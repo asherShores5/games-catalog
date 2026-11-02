@@ -2,11 +2,12 @@
 import { MISSINGS, OWNERSHIPS, type GameFilter, type Missing, type Ownership } from "./search";
 import { PLAY_STATUSES, type PlayStatus } from "./types";
 
-/** Query string for the filter, without the leading "?" ("" when nothing is set). Params: q, platform, show, status, missing, tag (repeated). */
+/** Query string for the filter, without the leading "?" ("" when nothing is set). Params: q, platform, place, show, status, missing, tag (repeated). */
 export function filterToUrl(filter: GameFilter): string {
   const params = new URLSearchParams();
   if (filter.query) params.set("q", filter.query);
   if (filter.platformId) params.set("platform", filter.platformId);
+  if (filter.placeId) params.set("place", filter.placeId);
   if (filter.ownership) params.set("show", filter.ownership);
   if (filter.playStatus) params.set("status", filter.playStatus);
   if (filter.missing) params.set("missing", filter.missing);
@@ -22,6 +23,8 @@ export function filterFromUrl(search: string): GameFilter {
   if (query) filter.query = query;
   const platformId = params.get("platform");
   if (platformId) filter.platformId = platformId;
+  const placeId = params.get("place");
+  if (placeId) filter.placeId = placeId;
   const show = params.get("show");
   if (OWNERSHIPS.includes(show as Ownership)) filter.ownership = show as Ownership;
   const status = params.get("status");

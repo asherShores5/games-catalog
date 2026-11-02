@@ -170,6 +170,29 @@ async function readOnly(page: Page) {
     return counts.join(", ") + (unknown ? "" : "");
   });
 
+  await check(page, "Tag chips: two picked means Games with both", async () => {
+    await page.locator(".tag-filter summary").click();
+    const chips = page.getByRole("group", { name: "Tag filter" });
+    await chips.getByRole("button", { name: "Co-op", exact: true }).click();
+    const coop = await rows(page).count();
+    await chips.getByRole("button", { name: "Couch co-op", exact: true }).click();
+    const both = await rows(page).count();
+    const badges = await page.locator("ul.games > li .badges").allInnerTexts();
+    expect(both <= coop && badges.every((b) => b.includes("Co-op") && b.includes("Couch co-op")), "a row missing one of the picked Tags");
+    expect(page.url().includes("tag="), "Tags not in the URL");
+    await clearFilters(page);
+    return `Co-op ${coop}, + Couch co-op ${both}`;
+  });
+
+  await check(page, "search finds Games by Tag name", async () => {
+    await search(page, "couch co-op");
+    const n = await rows(page).count();
+    const badges = await page.locator("ul.games > li .badges").allInnerTexts();
+    expect(n > 0 && badges.every((b) => b.includes("Couch co-op")), "a result without the Couch co-op Tag");
+    await search(page, "");
+    return `${n} Games`;
+  });
+
   await check(page, "Play status filter: Playing", async () => {
     await page.getByLabel("Play status").selectOption("Playing");
     const badges = await page.locator("ul.games > li .badges").allInnerTexts();
@@ -338,6 +361,26 @@ async function writes(page: Page) {
     await renameRow(page, `${run}-acct`, `${run}-acct2`);
     await deleteRow(page, `${run}-acct2`);
     await back(page);
+  });
+
+  await check(page, "Places: add, pick Platforms, filter by it, delete", async () => {
+    await goTo(page, "Places");
+    await page.getByPlaceholder("Add a Place, e.g. Couch").fill(`${run}-place`);
+    await page.getByRole("button", { name: "Add", exact: true }).click();
+    const group = page.getByRole("group", { name: `Platforms at ${run}-place` });
+    await group.waitFor({ timeout: 10_000 });
+    await group.getByRole("button", { name: "PC", exact: true }).click();
+    await group.getByRole("button", { name: "PC", exact: true, pressed: true }).waitFor({ timeout: 10_000 });
+    await home(page);
+    await page.getByLabel("Place").selectOption({ label: `${run}-place` });
+    const summaries = await page.locator("ul.games > li .copy-summary").allInnerTexts();
+    expect(summaries.length > 0 && summaries.every((s) => s.includes("PC")), "a Game without a PC Copy in the Place filter");
+    await clearFilters(page);
+    await goTo(page, "Places");
+    await page.locator("li.place").filter({ hasText: `${run}-place` }).getByRole("button", { name: "Delete" }).click();
+    await group.waitFor({ state: "detached", timeout: 10_000 });
+    await home(page);
+    return `${summaries.length} Games on PC`;
   });
 
   await check(page, "Tags: add two, rename, merge, delete", async () => {
