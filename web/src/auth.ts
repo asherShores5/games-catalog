@@ -98,8 +98,9 @@ export async function freshTokens(): Promise<Tokens> {
       accept(r, t.username, t.refreshToken);
       return tokens!;
     } catch (e) {
-      // Only a rejected refresh token signs you out; network and server errors keep the session.
-      if (e instanceof CognitoError && e.type === "NotAuthorizedException") save(null);
+      // Only a refresh token Cognito won't take signs you out (expired or revoked, or used twice:
+      // rotation then revokes the whole family). Network and server errors keep the session.
+      if (e instanceof CognitoError && (e.type === "NotAuthorizedException" || e.type === "RefreshTokenReuseException")) save(null);
       throw e;
     } finally {
       refreshing = null;
