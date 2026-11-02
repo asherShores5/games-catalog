@@ -14,7 +14,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "aws-cdk": "^2.1100.0",
+    "aws-cdk": "^2.1147.0",
     "esbuild": "^0.28.2",
     "graphql": "^16.14.2",
     "tsx": "^4.19.0",
