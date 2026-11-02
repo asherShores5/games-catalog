@@ -16,7 +16,6 @@ enum PlayStatus {
   Finished
 }
 
-"The hardware a Copy runs on (PC, PS5, Switch...). An editable list."
 "Where I play: a name and the Platforms there (Couch: Xbox, Switch 2…). A Platform can be in several Places."
 type Place {
   id: ID!
@@ -24,6 +23,7 @@ type Place {
   platformIds: [ID!]!
 }
 
+"The hardware a Copy runs on (PC, PS5, Switch...). An editable list."
 type Platform {
   id: ID!
   name: String!
