@@ -112,4 +112,13 @@ describe("staying signed in", () => {
     expect(auth.isSignedIn()).toBe(false);
     expect((await launch()).isSignedIn()).toBe(false);
   });
+
+  it("a refresh token Cognito saw used twice (reuse) signs out too, instead of a stuck screen", async () => {
+    await signedIn();
+    vi.useFakeTimers({ now: Date.now() + 2 * 3600_000, toFake: ["Date"] });
+    cognito.GetTokensFromRefreshToken = [{ status: 400, body: { __type: "RefreshTokenReuseException", message: "Refresh token reuse detected" } }];
+    const auth = await launch();
+    await expect(auth.freshTokens()).rejects.toThrow(/reuse/);
+    expect(auth.isSignedIn()).toBe(false);
+  });
 });
