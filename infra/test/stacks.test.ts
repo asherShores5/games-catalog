@@ -212,7 +212,7 @@ describe("deploy CI (GitHub OIDC)", () => {
     expect(s.Condition).toEqual({
       StringEquals: {
         "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-        "token.actions.githubusercontent.com:sub": ["repo:asherShores5/games-catalog:ref:refs/heads/prod"],
+        "token.actions.githubusercontent.com:sub": ["repo:asherShores5/games-catalog:environment:production"],
       },
     });
   });
@@ -221,8 +221,8 @@ describe("deploy CI (GitHub OIDC)", () => {
     const stack = new CiStack(new App(), "Ci", { env: { account: HOSTING.account, region: "us-west-1" }, githubRepoId: "987654321" });
     const [s] = Object.values(Template.fromStack(stack).findResources("AWS::IAM::Role"))[0].Properties.AssumeRolePolicyDocument.Statement;
     expect(s.Condition.StringEquals["token.actions.githubusercontent.com:sub"]).toEqual([
-      "repo:asherShores5/games-catalog:ref:refs/heads/prod",
-      "repo:asherShores5@71547146/games-catalog@987654321:ref:refs/heads/prod",
+      "repo:asherShores5/games-catalog:environment:production",
+      "repo:asherShores5@71547146/games-catalog@987654321:environment:production",
     ]);
   });
 

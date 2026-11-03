@@ -37,6 +37,8 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/prod'
     needs: test
     runs-on: ubuntu-latest
+    # Waits for Asher's approval in GitHub; the AWS role trusts only this environment.
+    environment: production
     permissions:
       id-token: write # OIDC -> AWS
       contents: read
