@@ -5,6 +5,8 @@ export const GITHUB_REPO = "asherShores5/games-catalog";
 /** asherShores5's immutable GitHub owner ID (public). GitHub's OIDC `sub` can embed owner@id/repo@id. */
 const GITHUB_OWNER_ID = "71547146";
 export const DEPLOY_BRANCH = "prod";
+/** GitHub Environment the deploy job runs in; it requires Asher's approval and only allows the prod branch. */
+export const DEPLOY_ENVIRONMENT = "production";
 export const DEPLOY_ROLE_NAME = "games-catalog-github-deploy";
 
 interface CiStackProps extends StackProps {
@@ -13,8 +15,8 @@ interface CiStackProps extends StackProps {
 }
 
 /**
- * GitHub Actions -> AWS via OIDC (no stored keys). Only workflows on the prod branch of this repo
- * can assume the role, and the role can only assume the CDK bootstrap roles.
+ * GitHub Actions -> AWS via OIDC (no stored keys). Only jobs in this repo's `production` GitHub Environment
+ * (approval required, prod branch only) can assume the role, and the role can only assume the CDK bootstrap roles.
  *
  * The account's GitHub OIDC provider already exists (Honey Do's CiStack created it, and an account
  * can have only one per URL), so this imports it rather than creating a second.
@@ -41,7 +43,7 @@ export class CiStack extends Stack {
       assumedBy: new iam.WebIdentityPrincipal(provider.openIdConnectProviderArn, {
         StringEquals: {
           "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
-          "token.actions.githubusercontent.com:sub": repos.map((r) => `repo:${r}:ref:refs/heads/${DEPLOY_BRANCH}`),
+          "token.actions.githubusercontent.com:sub": repos.map((r) => `repo:${r}:environment:${DEPLOY_ENVIRONMENT}`),
         },
       }),
     });
