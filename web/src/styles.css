@@ -257,3 +257,11 @@ li > div:last-child:not(.detail) { padding-bottom: 0.6rem; }
   .detail .add > input:not([type="checkbox"]) { flex-basis: 100%; }
   .detail .add > button.primary { flex: 1; }
 }
+
+/* Guest demo */
+.demo-offer { margin: 0.5rem 0 0; color: var(--muted); font-size: 0.9rem; text-align: center; }
+.demo-banner {
+  margin: 0 0 1rem; padding: 0.6rem 0.8rem; border-radius: 8px; font-size: 0.9rem;
+  background: color-mix(in srgb, var(--wishlist) 12%, transparent); color: var(--text);
+}
+.demo-offer .link { padding: 0 0.15rem; }

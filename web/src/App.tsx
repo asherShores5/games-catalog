@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { isSignedIn, onAuthChange } from "./auth";
 import { loadConfig } from "./config";
+import { isDemo, onDemoChange } from "./demo";
 import { Games } from "./views/Games";
 import { Login } from "./views/Login";
 
@@ -8,11 +9,14 @@ export function App() {
   const [configured, setConfigured] = useState(false);
   const [configError, setConfigError] = useState<string>();
   const signedIn = useSyncExternalStore(onAuthChange, isSignedIn);
+  const demo = useSyncExternalStore(onDemoChange, isDemo);
 
   useEffect(() => {
     loadConfig().then(() => setConfigured(true), (e) => setConfigError(String(e)));
   }, []);
 
+  // The demo needs no config or account: it never calls the API.
+  if (demo) return <Games key="demo" demo />;
   if (configError) return <div className="center">Couldn't load app config: {configError}</div>;
   if (!configured) return <div className="center">Loading…</div>;
   return signedIn ? <Games /> : <Login />;

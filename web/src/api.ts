@@ -1,6 +1,8 @@
 import type { Account, Format, Game, Place, Platform, PlayStatus, SteamImportSummary, Store, Tag } from "@games/shared";
 import { freshTokens } from "./auth";
 import { getConfig } from "./config";
+import { isDemo } from "./demo";
+import type { DemoLibrary } from "./demoData";
 
 const COPY = `id platformId format accountId edition createdAt`;
 const GAME = `id name copies { ${COPY} } owned wishlist playStatus tags { tagId source } steamAppId createdAt updatedAt`;
@@ -48,7 +50,20 @@ export const Q = {
     mergeGames(fromId: $fromId, intoId: $intoId, playStatus: $playStatus) { ${GAME} } }`,
 };
 
+/** What the guest demo answers each list query with; anything else is a change, refused. */
+const DEMO_LISTS: Record<string, keyof DemoLibrary> = {
+  [Q.games]: "games", [Q.platforms]: "platforms", [Q.accounts]: "accounts", [Q.places]: "places", [Q.tags]: "tags",
+};
+
+async function demoGql<T>(query: string): Promise<T> {
+  const list = DEMO_LISTS[query];
+  if (!list) throw new Error("This is a read-only demo. Nothing can be changed.");
+  const { demoLibrary } = await import("./demoData");
+  return { [list]: demoLibrary()[list] } as T;
+}
+
 export async function gql<T = any>(query: string, variables: object = {}): Promise<T> {
+  if (isDemo()) return demoGql<T>(query);
   const { idToken } = await freshTokens();
   const r = await fetch(getConfig().graphqlUrl, {
     method: "POST",

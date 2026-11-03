@@ -43,3 +43,5 @@
 **Place**: Where I play (Couch, Game room), as a list of Platforms. A Platform can be in several Places, and a Platform that plays another's Games (Wii for GameCube, Switch 2 for Switch) is handled by putting both in the Place. The Place filter shows Games with a Copy on any Platform in it.
 
 **Search**: Matches the whole query in a Game's name, or else every word of it in the name or one of the Game's Tag names ("co-op rpg", "couch co-op").
+
+**Demo**: The guest view for visitors who can't sign in: a sample library with invented Copies, browse-only (search, filter, open a Game). Entered from the sign-in page or a `?demo` link, kept per browser tab. It never calls the API, so it can't see or change real data and costs nothing.
