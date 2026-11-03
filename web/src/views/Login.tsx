@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { signInWithPassword } from "../auth";
+import { enterDemo } from "../demo";
 
 export function Login() {
   const [username, setUsername] = useState("");
@@ -28,6 +29,9 @@ export function Login() {
         onChange={(e) => setPassword(e.target.value)} />
       <button className="primary" disabled={busy || !username || !password}>Sign in</button>
       {error && <p className="error">{error}</p>}
+      <p className="demo-offer">
+        No sign-in? <button type="button" className="link" onClick={enterDemo}>Try the demo</button> with a sample library.
+      </p>
     </form>
   );
 }

@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { accountLabel, byName, cleanGameName, withoutUnknownTags, type Account, type CopyNames, type Game, type Place, type Platform } from "@games/shared";
 import { addGame, listAccounts, listGames, listPlaces, listPlatforms } from "../api";
 import { signOut } from "../auth";
+import { exitDemo } from "../demo";
+import { ReadOnlyGame } from "./ReadOnlyGame";
 import { Accounts } from "./Accounts";
 import { FilterBar, useUrlFilter } from "./FilterBar";
 import { GameDetail } from "./GameDetail";
@@ -15,8 +17,12 @@ import { DeleteGame } from "./DeleteGame";
 import { MergeGame } from "./MergeGame";
 import { Tags } from "./Tags";
 
-/** My Games: add one by name, search and filter the list, open one to manage its Copies. */
-export function Games() {
+/**
+ * My Games: add one by name, search and filter the list, open one to manage its Copies.
+ * In the guest demo (`demo`), the same list over a sample library, browse-only: no adding,
+ * editing, Import or list management.
+ */
+export function Games({ demo = false }: { demo?: boolean }) {
   const [games, setGames] = useState<Game[]>();
   const [platforms, setPlatforms] = useState<Platform[]>([]);
   const [name, setName] = useState("");
@@ -58,6 +64,7 @@ export function Games() {
     listPlaces().then(setPlaces, (e) => setError(String(e.message ?? e)));
   }, []);
 
+  const names = copyNames(platforms, accounts);
   const replace = (game: Game) => setGames((gs) => (gs ?? []).map((g) => (g.id === game.id ? game : g)));
 
   async function submit(e: React.FormEvent) {
@@ -99,6 +106,11 @@ export function Games() {
     <main>
       <header>
         <h1>Games</h1>
+        {demo ? (
+          <nav>
+            <button className="link" onClick={exitDemo}>Exit demo</button>
+          </nav>
+        ) : (
         <nav>
           <button className="link" onClick={() => setShowPlaces(true)}>Places</button>
           <button className="link" onClick={() => setShowPlatforms(true)}>Platforms</button>
@@ -106,11 +118,18 @@ export function Games() {
           <button className="link" onClick={() => setShowTags(true)}>Tags</button>
           <button className="link" onClick={() => void signOut()}>Sign out</button>
         </nav>
+        )}
       </header>
-      <form className="add" onSubmit={submit}>
-        <input placeholder="Add a Game" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} />
-        <button className="primary" disabled={busy || !cleanGameName(name)}>Add</button>
-      </form>
+      {demo ? (
+        <p className="demo-banner">
+          <strong>Demo</strong> · A sample library, read-only. Search, filter and open any Game to see its Copies.
+        </p>
+      ) : (
+        <form className="add" onSubmit={submit}>
+          <input placeholder="Add a Game" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} />
+          <button className="primary" disabled={busy || !cleanGameName(name)}>Add</button>
+        </form>
+      )}
       {error && <p className="error">{error}</p>}
       {!games ? (
         <p>Loading…</p>
@@ -121,18 +140,20 @@ export function Games() {
             games={games}
             filter={filter}
             lookups={{ places, tagName: (id) => tags.find((t) => t.id === id)?.name }}
-            names={copyNames(platforms, accounts)}
+            names={names}
             tagName={(id) => tags.find((t) => t.id === id)?.name}
             openId={openId}
             onToggle={(id) => setOpenId(openId === id ? undefined : id)}
-            renderDetail={(g) => (
+            renderDetail={(g) => demo ? (
+              <ReadOnlyGame game={g} names={names} />
+            ) : (
               <>
                 <GameDetail game={g} platforms={platforms} accounts={accounts} onChange={replace} />
                 <GameTags game={g} tags={tags} onChange={replace} onTagsChange={setTags} />
                 <MergeGame
                   game={g}
                   games={games}
-                  names={copyNames(platforms, accounts)}
+                  names={names}
                   tagName={(id) => tags.find((t) => t.id === id)?.name}
                   onMerged={(merged, goneId) => {
                     setGames((gs) => (gs ?? []).filter((x) => x.id !== goneId).map((x) => (x.id === merged.id ? merged : x)));
