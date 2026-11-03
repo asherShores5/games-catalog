@@ -1,8 +1,8 @@
 // Screenshots of the built web app (web/dist) with a fake backend, for design work. No network:
 // config, Cognito and AppSync are all answered here, so nothing touches the live site.
 //   npm run build:web (repo root), then: cd e2e && npm run preview
-// Writes e2e/out/preview-*.png: login, list, an open Game, filters, Tags; desktop and iPhone,
-// light and dark.
+// Writes e2e/out/preview-*.png: login, list, an open Game, filters, Tags, then the guest demo
+// (which must make no API or Cognito calls); desktop and iPhone, light and dark.
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -118,6 +118,28 @@ async function shoot(context: BrowserContextOptions, label: string) {
   await signed.getByRole("button", { name: "Places", exact: true }).click();
   await signed.getByRole("heading", { name: "Places" }).waitFor();
   await snap2("5-places");
+
+  // Guest demo, entered from the Login page: sample library, read-only, no API or Cognito calls.
+  const guest = await (await browser.newContext(context)).newPage();
+  guest.on("pageerror", (e) => errors.push(e.message));
+  guest.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+  await serve(guest, false);
+  const apiCalls: string[] = [];
+  guest.on("request", (r) => { if (!r.url().startsWith(ORIGIN)) apiCalls.push(r.url()); });
+  await guest.goto(ORIGIN);
+  await guest.getByRole("button", { name: "Try the demo" }).click();
+  await guest.locator("ul.games").waitFor();
+  const snap3 = (name: string) => guest.screenshot({ path: path.join(OUT, `preview-${label}-${name}.png`), fullPage: true });
+  await snap3("6-demo-list");
+  await guest.locator("ul.games > li").filter({ hasText: "The Witcher 3" }).locator("button.row").click();
+  await guest.locator(".detail").first().waitFor();
+  if (await guest.getByRole("button", { name: /Add|Remove|Merge|Delete/ }).count()) errors.push("demo shows an edit control");
+  await snap3("7-demo-open");
+  await guest.getByRole("button", { name: "Exit demo" }).click();
+  await guest.getByPlaceholder("Password").waitFor();
+  await guest.goto(`${ORIGIN}/?demo`);
+  await guest.locator("ul.games").waitFor();
+  if (apiCalls.length) errors.push(`demo made outside calls: ${apiCalls.join(", ")}`);
   await browser.close();
   if (errors.length) console.log(`${label} page errors:\n  ${errors.join("\n  ")}`);
 }
